@@ -5,6 +5,9 @@ import "openzeppelin-contracts/access/Ownable.sol";
 
 import "./interfaces/IKycManager.sol";
 
+/**
+ * Handles address permissions. An address can be KYCed for US or non-US purposes. Additionally, an address may be banned
+ */
 contract KycManager is IKycManager, Ownable {
     mapping(address => User) userList;
     bool strictOn;
@@ -14,9 +17,10 @@ contract KycManager is IKycManager, Ownable {
         _;
     }
 
-    /*//////////////////////////////////////////////////////////////
-                          GRANT KYC
-    //////////////////////////////////////////////////////////////*/
+    ////////////////////////////////////////////////////////////
+    // Grant
+    ////////////////////////////////////////////////////////////
+
     function grantKycInBulk(address[] calldata _investors, KycType[] calldata _kycTypes) external onlyOwner {
         require(_investors.length == _kycTypes.length, "invalid input");
         for (uint256 i = 0; i < _investors.length; i++) {
@@ -32,9 +36,10 @@ contract KycManager is IKycManager, Ownable {
         emit GrantKyc(_investor, _kycType);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                          REVOKE KYC
-    //////////////////////////////////////////////////////////////*/
+    ////////////////////////////////////////////////////////////
+    // Revoke
+    ////////////////////////////////////////////////////////////
+
     function revokeKycInBulk(address[] calldata _investors) external onlyOwner {
         for (uint256 i = 0; i < _investors.length; i++) {
             _revokeKyc(_investors[i]);
@@ -47,18 +52,20 @@ contract KycManager is IKycManager, Ownable {
         user.kycType = KycType.NON_KYC;
     }
 
-    /*//////////////////////////////////////////////////////////////
-                          BAN KYC
-    //////////////////////////////////////////////////////////////*/
+    ////////////////////////////////////////////////////////////
+    // Ban
+    ////////////////////////////////////////////////////////////
+
     function bannedInBulk(address[] calldata _investors) external onlyOwner {
         for (uint256 i = 0; i < _investors.length; i++) {
             _bannedInternal(_investors[i], true);
         }
     }
 
-    /*//////////////////////////////////////////////////////////////
-                          UNBAN KYC
-    //////////////////////////////////////////////////////////////*/
+    ////////////////////////////////////////////////////////////
+    // Unban
+    ////////////////////////////////////////////////////////////
+
     function unBannedInBulk(address[] calldata _investors) external onlyOwner {
         for (uint256 i = 0; i < _investors.length; i++) {
             _bannedInternal(_investors[i], false);
@@ -76,9 +83,10 @@ contract KycManager is IKycManager, Ownable {
         emit SetStrict(_status);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                            USED BY INTERFACE
-    //////////////////////////////////////////////////////////////*/
+    ////////////////////////////////////////////////////////////
+    // Public getters
+    ////////////////////////////////////////////////////////////
+
     function getUserInfo(address _investor) external view returns (User memory user) {
         user = userList[_investor];
     }

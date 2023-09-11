@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-import "openzeppelin-contracts/access/AccessControl.sol";
 import "openzeppelin-contracts-upgradeable/security/PausableUpgradeable.sol";
 import "openzeppelin-contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
 import "openzeppelin-contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
@@ -10,14 +9,28 @@ import "./ChainlinkAccessor.sol";
 import "./interfaces/IBaseVault.sol";
 import "./interfaces/IFundVault.sol";
 import "./interfaces/IKycManager.sol";
+import "./utils/AdminOperatorRoles.sol";
 import "./utils/BytesQueue.sol";
 
+/**
+ * Represents a fund vault with offchain NAV and onchain assets for liquidity.
+ *
+ * Roles:
+ * - Investors who can subscribe/redeem the fund
+ * - Operators who manage day-to-day operations
+ * - Admins who can handle operator tasks but also set economic parameters
+ *
+ * ## Operator Workflow
+ * - Call {requestAdvanceEpoch} after each NAV report is published to update {_latestOffchainNAV}
+ * - Call {requestWithdrawalQueue} after assets have been deposited back into the vault to process queued withdraws
+ * - Call {transferToTreasury} after deposits to move offchain
+ */
 contract FundVault is
     ERC4626Upgradeable,
     ReentrancyGuardUpgradeable,
     PausableUpgradeable,
     ChainlinkAccessor,
-    AccessControl,
+    AdminOperatorRoles,
     IFundVault
 {
     using MathUpgradeable for uint256;
@@ -26,42 +39,22 @@ contract FundVault is
     BytesQueue.BytesDeque _withdrawalQueue;
     uint256 public _latestOffchainNAV;
 
-    bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
     uint256 private constant BPS_UNIT = 10000;
 
     uint256 public _minTxFee;
-    address public _feeReceiver;
-
     uint256 public _onchainFee;
     uint256 public _offchainFee;
     uint256 public _epoch;
+
+    address public _feeReceiver;
     address public _treasury;
 
     IBaseVault public _baseVault;
     IKycManager public _kycManager;
-    mapping(address => bool) public _initialDeposit;
 
+    mapping(address => bool) public _initialDeposit;
     mapping(address => mapping(uint256 => uint256)) _depositAmount; // account => [epoch => depositAmount]
     mapping(address => mapping(uint256 => uint256)) _withdrawAmount; // account => [epoch => depositAmount]
-
-    ////////////////////////////////////////////////////////////
-    // Modifiers
-    ////////////////////////////////////////////////////////////
-
-    modifier onlyAdminOrOperator() {
-        require(hasRole(DEFAULT_ADMIN_ROLE, _msgSender()) || hasRole(OPERATOR_ROLE, _msgSender()), "permission denied");
-        _;
-    }
-
-    modifier onlyAdmin() {
-        _checkRole(DEFAULT_ADMIN_ROLE);
-        _;
-    }
-
-    modifier onlyCaller(address receiver) {
-        require(_msgSender() == receiver, "receiver must be caller");
-        _;
-    }
 
     ////////////////////////////////////////////////////////////
     // Init
@@ -130,26 +123,30 @@ contract FundVault is
     }
 
     /**
-     * Called after each NAV update has been published
+     * Call after each NAV update has been published, in order to update {_latestOffchainNAV}.
+     * @notice Do not call more than once per day, since {_getServiceFee} calculates daily fees.
+     * @dev Handled in {_advanceEpoch}
      */
     function requestAdvanceEpoch() external onlyAdminOrOperator {
         bytes32 requestId = super._requestTotalOffchainNAV(_msgSender(), 0, Action.ADVANCE_EPOCH, decimals());
 
-        // Handled in fulfill()
         emit RequestAdvanceEpoch(msg.sender, requestId);
     }
 
+    /**
+     * Call after sufficient assets have been returned to the vault to process withdraws.
+     * @dev Handled in {_processWithdrawalQueue}
+     */
     function requestWithdrawalQueue() external onlyAdminOrOperator {
         require(!_withdrawalQueue.empty(), "queue is empty");
 
         bytes32 requestId = super._requestTotalOffchainNAV(_msgSender(), 0, Action.WITHDRAW_QUEUE, decimals());
 
-        // Handled in fulfill()
         emit RequestWithdrawalQueue(msg.sender, requestId);
     }
 
     /**
-     * Sweep all asset to treasury, keeping only the targetReservesLevel of assets
+     * Sweeps all asset to {_treasury}, keeping only the `targetReservesLevel` of assets
      */
     function transferExcessReservesToTreasury() external onlyAdminOrOperator {
         uint256 amount = excessReserves();
@@ -158,7 +155,7 @@ contract FundVault is
     }
 
     /**
-     * @dev Transfer any underlying assets to treasury.
+     * Transfers any underlying assets to {_treasury}.
      */
     function transferToTreasury(address underlying, uint256 amount) public onlyAdminOrOperator {
         require(_treasury != address(0), "invalid treasury");
@@ -169,12 +166,15 @@ contract FundVault is
         emit TransferToTreasury(_treasury, amount);
     }
 
+    /**
+     * Sets the minimum transaction fee
+     */
     function setMinTxFee(uint256 newValue) external onlyAdminOrOperator {
         _setMinTxFee(newValue);
     }
 
     /**
-     * Send the onchain service fee to the fee receiver
+     * Sends the accumulated onchain service fee to {_feeReceiver}
      */
     function claimOnchainServiceFee(uint256 amount) external onlyAdminOrOperator {
         require(_feeReceiver != address(0), "invalid feeReceiver address");
@@ -185,7 +185,7 @@ contract FundVault is
     }
 
     /**
-     * Send the offchain service fee to the fee receiver
+     * Sends the accumulated offchain service fee to {_feeReceiver}
      */
     function claimOffchainServiceFee(uint256 amount) external onlyAdminOrOperator {
         require(_feeReceiver != address(0), "invalid feeReceiver address");
@@ -196,8 +196,116 @@ contract FundVault is
     }
 
     ////////////////////////////////////////////////////////////
+    // Chainlink
+    ////////////////////////////////////////////////////////////
+
+    /**
+     * Handler for Chainlink requests. Always contains the latest NAV data.
+     * Processes deposits and withdraws, or updates epoch data
+     */
+    function fulfill(bytes32 requestId, uint256 latestNAV) external recordChainlinkFulfillment(requestId) {
+        _latestOffchainNAV = latestNAV;
+
+        (address investor, uint256 amount, Action action) = super.getRequestData(requestId);
+
+        if (action == Action.DEPOSIT) {
+            _processDeposit(investor, amount, requestId);
+        } else if (action == Action.WITHDRAW) {
+            _processWithdraw(investor, amount, requestId);
+        } else if (action == Action.WITHDRAW_QUEUE) {
+            _processWithdrawalQueue(requestId);
+        } else if (action == Action.ADVANCE_EPOCH) {
+            _advanceEpoch(requestId);
+        }
+        emit Fulfill(investor, requestId, latestNAV, amount, uint8(action));
+    }
+
+    ////////////////////////////////////////////////////////////
+    // Public entrypoints
+    ////////////////////////////////////////////////////////////
+
+    /**
+     * Subscribe to the fund.
+     * @dev Handled in {_processDeposit}
+     * @param assets Amount of {asset} to subscribe
+     * @param receiver Must be msg.sender
+     */
+    function deposit(uint256 assets, address receiver)
+        public
+        override
+        onlyCaller(receiver)
+        nonReentrant
+        whenNotPaused
+        returns (uint256)
+    {
+        // receiver is msg.sender
+        _kycManager.onlyKyc(receiver);
+        _kycManager.onlyNotBanned(receiver);
+
+        _validateDeposit(assets);
+        bytes32 requestId = super._requestTotalOffchainNAV(receiver, assets, Action.DEPOSIT, decimals());
+
+        emit RequestDeposit(receiver, assets, requestId);
+        return 0;
+    }
+
+    /**
+     * Redeem from the fund.
+     * @dev Handled in {_processWithdraw}
+     * @param shares Amount of shares to redeem
+     * @param receiver Must be msg.sender
+     * @param owner Must be msg.sender
+     */
+    function withdraw(uint256 shares, address receiver, address owner)
+        public
+        override
+        onlyCaller(receiver)
+        onlyCaller(owner)
+        nonReentrant
+        whenNotPaused
+        returns (uint256)
+    {
+        // receiver is msg.sender
+        _kycManager.onlyKyc(receiver);
+        _kycManager.onlyNotBanned(receiver);
+
+        _validateWithdraw(receiver, shares);
+        bytes32 requestId = super._requestTotalOffchainNAV(receiver, shares, Action.WITHDRAW, decimals());
+
+        emit RequestWithdraw(receiver, shares, requestId);
+        return 0;
+    }
+
+    /**
+     * @notice Cannot be directly minted.
+     */
+    function mint(uint256, address) public pure override returns (uint256) {
+        revert();
+    }
+
+    /**
+     * @notice Cannot be directly redeemed.
+     */
+    function redeem(uint256, address, address) public pure override returns (uint256) {
+        revert();
+    }
+
+    ////////////////////////////////////////////////////////////
     // Public getters
     ////////////////////////////////////////////////////////////
+
+    function getWithdrawalQueueInfo(uint256 index) external view returns (address investor, uint256 shares) {
+        if (_withdrawalQueue.empty() || index > _withdrawalQueue.length() - 1) {
+            return (address(0), 0);
+        }
+
+        bytes memory data = bytes(_withdrawalQueue.at(index));
+        (investor, shares) = abi.decode(data, (address, uint256));
+    }
+
+    function getWithdrawalQueueLength() external view returns (uint256) {
+        return _withdrawalQueue.length();
+    }
 
     /**
      * Returns the maximum of the calculated fee and the minimum fee.
@@ -243,19 +351,6 @@ contract FundVault is
         return (depositAmt, withdrawAmt, delta);
     }
 
-    function getWithdrawalQueueInfo(uint256 index) external view returns (address investor, uint256 shares) {
-        if (_withdrawalQueue.empty() || index > _withdrawalQueue.length() - 1) {
-            return (address(0), 0);
-        }
-
-        bytes memory data = bytes(_withdrawalQueue.at(index));
-        (investor, shares) = abi.decode(data, (address, uint256));
-    }
-
-    function getWithdrawalQueueLength() external view returns (uint256) {
-        return _withdrawalQueue.length();
-    }
-
     /**
      * @notice totalAssets(): returns the amount of vault assets (eg. USDC), including fees
      *
@@ -281,32 +376,14 @@ contract FundVault is
         amount = currentReserves > targetReserves ? currentReserves - targetReserves : 0;
     }
 
-    /**
-     * Handler for Chainlink requests. Always contains the latest NAV data.
-     * Processes deposits and withdraws, or updates epoch data
-     */
-    function fulfill(bytes32 requestId, uint256 latestNAV) external recordChainlinkFulfillment(requestId) {
-        _latestOffchainNAV = latestNAV;
-
-        (address investor, uint256 amount, Action action) = super.getRequestData(requestId);
-
-        if (action == Action.DEPOSIT) {
-            _processDeposit(investor, amount, requestId);
-        } else if (action == Action.WITHDRAW) {
-            _processWithdraw(investor, amount, requestId);
-        } else if (action == Action.WITHDRAW_QUEUE) {
-            _processWithdrawalQueue(requestId);
-        } else if (action == Action.ADVANCE_EPOCH) {
-            _advanceEpoch(requestId);
-        }
-        emit Fulfill(investor, requestId, latestNAV, amount, uint8(action));
-    }
-
     ////////////////////////////////////////////////////////////
     // ERC-4626 Overrides
     ////////////////////////////////////////////////////////////
 
     /**
+     * Applies KYC checks on transfers. Sender/receiver cannot be banned.
+     * If strict, check both sender/receiver.
+     * If sender is US, check receiver.
      * @dev will be called during: transfer, transferFrom, mint, burn
      */
     function _beforeTokenTransfer(address from, address to, uint256) internal view override {
@@ -324,75 +401,6 @@ contract FundVault is
         } else if (_kycManager.isUSKyc(from)) {
             _kycManager.onlyKyc(to);
         }
-    }
-
-    function _msgSender() internal view virtual override(Context, ContextUpgradeable) returns (address) {
-        return msg.sender;
-    }
-
-    function _msgData() internal view virtual override(Context, ContextUpgradeable) returns (bytes calldata) {
-        return msg.data;
-    }
-
-    /**
-     * @dev See {IERC4626-deposit}.
-     */
-    function deposit(uint256 assets, address receiver)
-        public
-        override
-        onlyCaller(receiver)
-        nonReentrant
-        whenNotPaused
-        returns (uint256)
-    {
-        // receiver is msg.sender
-        _kycManager.onlyKyc(receiver);
-        _kycManager.onlyNotBanned(receiver);
-
-        _validateDeposit(assets);
-        bytes32 requestId = super._requestTotalOffchainNAV(receiver, assets, Action.DEPOSIT, decimals());
-
-        // Deposit will be handled in fulfill()
-        emit RequestDeposit(receiver, assets, requestId);
-        return 0;
-    }
-
-    /**
-     * @dev See {IERC4626-withdraw}.
-     */
-    function withdraw(uint256 shares, address receiver, address owner)
-        public
-        override
-        onlyCaller(receiver)
-        onlyCaller(owner)
-        nonReentrant
-        whenNotPaused
-        returns (uint256)
-    {
-        // receiver is msg.sender
-        _kycManager.onlyKyc(receiver);
-        _kycManager.onlyNotBanned(receiver);
-
-        _validateWithdraw(receiver, shares);
-        bytes32 requestId = super._requestTotalOffchainNAV(receiver, shares, Action.WITHDRAW, decimals());
-
-        // Withdraw will be handled in fulfill()
-        emit RequestWithdraw(receiver, shares, requestId);
-        return 0;
-    }
-
-    /**
-     * Cannot be directly minted.
-     */
-    function mint(uint256, address) public pure override returns (uint256) {
-        revert();
-    }
-
-    /**
-     * Cannot be directly redeemed.
-     */
-    function redeem(uint256, address, address) public pure override returns (uint256) {
-        revert();
     }
 
     function _convertToAssets(uint256 shares, MathUpgradeable.Rounding rounding)
@@ -452,6 +460,9 @@ contract FundVault is
     // Internal
     ////////////////////////////////////////////////////////////
 
+    /**
+     * Ensures deposit amount is within limits
+     */
     function _validateDeposit(uint256 assets) internal view {
         // gas saving by defining local variable
         address sender = _msgSender();
@@ -477,12 +488,15 @@ contract FundVault is
         }
     }
 
+    /**
+     * Transfers assets from investor to vault, and tx fees to {_feeReceiver}
+     */
     function _processDeposit(address investor, uint256 assets, bytes32 requestId) internal {
         uint256 txFee = getTxFee(assets);
         uint256 actualAsset = assets - txFee;
 
         uint256 shares = previewDeposit(actualAsset);
-        _deposit(investor, investor, actualAsset, shares);
+        super._deposit(investor, investor, actualAsset, shares);
 
         SafeERC20Upgradeable.safeTransferFrom(IERC20Upgradeable(asset()), investor, _feeReceiver, txFee);
         if (!_initialDeposit[investor]) {
@@ -493,6 +507,9 @@ contract FundVault is
         emit ProcessDeposit(investor, assets, shares, requestId, txFee, _feeReceiver);
     }
 
+    /**
+     * Ensures withdraw amount is within limits
+     */
     function _validateWithdraw(address sender, uint256 share) internal view virtual {
         require(share <= balanceOf(sender), "withdraw more than balance");
         require(share > 0, "withdraw invalid amount");
@@ -512,6 +529,10 @@ contract FundVault is
         }
     }
 
+    /**
+     * Burns shares and transfers assets to investor.
+     * NOTE: If insufficient asset liquidity, then queue for later
+     */
     function _processWithdraw(address investor, uint256 shares, bytes32 requestId) internal {
         require(shares <= balanceOf(investor), "insufficient amount");
         uint256 currentFreeAssets = totalAssets();
@@ -520,16 +541,17 @@ contract FundVault is
         uint256 actualShare = shares;
         uint256 actualAssets = assets;
 
-        // calculated assets are insufficient, use all free
+        // Requested assets are insufficient, use all free
         if (actualAssets > currentFreeAssets) {
             actualAssets = currentFreeAssets;
             actualShare = previewWithdraw(actualAssets);
         }
 
         if (actualAssets > 0) {
-            _withdraw(investor, investor, investor, actualAssets, actualShare);
+            super._withdraw(investor, investor, investor, actualAssets, actualShare);
         }
 
+        // Queue remaining shares for later
         if (shares > actualShare) {
             _addToWithdrawalQueue(investor, shares - actualShare, requestId);
         }
@@ -538,12 +560,9 @@ contract FundVault is
         emit ProcessWithdraw(investor, assets, shares, requestId, currentFreeAssets, actualShare);
     }
 
-    function _getAssetBalance(address addr) internal view returns (uint256) {
-        return IERC20Upgradeable(asset()).balanceOf(addr);
-    }
-
     /**
-     * @dev Add withdrawal to queue
+     * Adds withdrawal to queue to be processed later by calling {requestWithdrawalQueue}
+     * @dev Transfers shares from investor to vault
      * @param investor withdraw user
      * @param shares the amount of assets in shares
      * @param requestId requestId in chainlinkAccessor
@@ -551,10 +570,14 @@ contract FundVault is
     function _addToWithdrawalQueue(address investor, uint256 shares, bytes32 requestId) internal {
         bytes memory data = abi.encode(investor, shares, requestId);
         _withdrawalQueue.pushBack(data);
-        _transfer(investor, address(this), shares);
+        super._transfer(investor, address(this), shares);
         emit UpdateQueueWithdrawal(investor, shares, requestId);
     }
 
+    /**
+     * Processes queued withdraws until no assets are remaining.
+     * @dev May have remainders
+     */
     function _processWithdrawalQueue(bytes32 requestId) internal {
         for (; !_withdrawalQueue.empty();) {
             bytes memory data = _withdrawalQueue.front();
@@ -575,7 +598,7 @@ contract FundVault is
     }
 
     /**
-     * Advance epoch and calculate accrued fees
+     * Advances epoch and accrues fees based on {BaseVault-getOnchainAndOffChainServiceFeeRate}
      */
     function _advanceEpoch(bytes32 requestId) internal {
         _epoch++;
@@ -593,35 +616,23 @@ contract FundVault is
         emit UpdateMinTxFee(newValue);
     }
 
+    function _getAssetBalance(address addr) internal view returns (uint256) {
+        return IERC20Upgradeable(asset()).balanceOf(addr);
+    }
+
     function _getServiceFee(uint256 assets, uint256 rate) internal pure returns (uint256 fee) {
         return (assets * rate) / (365 * BPS_UNIT);
     }
 
     ////////////////////////////////////////////////////////////
-    // Implementation for ChainlinkAccessor
+    // Needed since we inherit both Context and ContextUpgradeable
     ////////////////////////////////////////////////////////////
 
-    function setChainlinkOracleAddress(address newAddress) external override onlyAdmin {
-        super._setChainlinkOracleAddress(newAddress);
+    function _msgSender() internal view virtual override(Context, ContextUpgradeable) returns (address) {
+        return msg.sender;
     }
 
-    function setChainlinkFee(uint256 fee) external override onlyAdmin {
-        super._setChainlinkFee(fee);
-    }
-
-    function setChainlinkJobId(bytes32 jobId) external override onlyAdmin {
-        super._setChainlinkJobId(jobId);
-    }
-
-    function setChainlinkURLData(string memory url) external override onlyAdmin {
-        super._setChainlinkURLData(url);
-    }
-
-    function setPathToOffchainAssets(string memory path) external override onlyAdmin {
-        super._setPathToOffchainAssets(path);
-    }
-
-    function setPathToTotalOffchainAssetAtLastClose(string memory path) external override onlyAdmin {
-        super._setPathToTotalOffchainAssetAtLastClose(path);
+    function _msgData() internal view virtual override(Context, ContextUpgradeable) returns (bytes calldata) {
+        return msg.data;
     }
 }

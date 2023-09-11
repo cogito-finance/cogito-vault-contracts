@@ -5,8 +5,12 @@ import "chainlink/ChainlinkClient.sol";
 
 import "./interfaces/IChainlinkAccessor.sol";
 import "./interfaces/IFundVault.sol";
+import "./utils/AdminRole.sol";
 
-abstract contract ChainlinkAccessor is IChainlinkAccessor, ChainlinkClient {
+/**
+ * Wrapper for ChainlinkClient. Builds Chainlink requests
+ */
+abstract contract ChainlinkAccessor is IChainlinkAccessor, ChainlinkClient, AdminRole {
     using Chainlink for Chainlink.Request;
 
     ChainlinkParameters _params;
@@ -64,6 +68,30 @@ abstract contract ChainlinkAccessor is IChainlinkAccessor, ChainlinkClient {
         _requestIdToRequestData[requestId] = requestData;
     }
 
+    function setChainlinkOracleAddress(address newAddress) external onlyAdmin {
+        _setChainlinkOracleAddress(newAddress);
+    }
+
+    function setChainlinkFee(uint256 fee) external onlyAdmin {
+        _setChainlinkFee(fee);
+    }
+
+    function setChainlinkJobId(bytes32 jobId) external onlyAdmin {
+        _setChainlinkJobId(jobId);
+    }
+
+    function setChainlinkURLData(string memory url) external onlyAdmin {
+        _setChainlinkURLData(url);
+    }
+
+    function setPathToOffchainAssets(string memory path) external onlyAdmin {
+        _setPathToOffchainAssets(path);
+    }
+
+    function setPathToTotalOffchainAssetAtLastClose(string memory path) external onlyAdmin {
+        _setPathToTotalOffchainAssetAtLastClose(path);
+    }
+
     function getChainLinkParameters() external view returns (ChainlinkParameters memory params) {
         params = _params;
     }
@@ -73,22 +101,6 @@ abstract contract ChainlinkAccessor is IChainlinkAccessor, ChainlinkClient {
         amount = _requestIdToRequestData[requestId].amount;
         action = _requestIdToRequestData[requestId].action;
     }
-
-    ////////////////////////////////////////////////////////////
-    // Setters to be implemented
-    ////////////////////////////////////////////////////////////
-
-    function setChainlinkOracleAddress(address newAddress) external virtual;
-
-    function setChainlinkFee(uint256 fee) external virtual;
-
-    function setChainlinkJobId(bytes32 jobId) external virtual;
-
-    function setChainlinkURLData(string memory url) external virtual;
-
-    function setPathToOffchainAssets(string memory path) external virtual;
-
-    function setPathToTotalOffchainAssetAtLastClose(string memory path) external virtual;
 
     ////////////////////////////////////////////////////////////
     // Internal implementation functions
