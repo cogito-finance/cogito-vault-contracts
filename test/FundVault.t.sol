@@ -23,6 +23,10 @@ contract VaultTest is Test, IFundVaultEvents, IChainlinkClient {
     address constant alice = address(0xdeadbeef1);
     address constant bob = address(0xdeadbeef2);
     address constant charlie = address(0xdeadbeef3);
+    address constant oracle = address(0xcafecafe1);
+    address constant operator = address(0xcafecafe2);
+    address constant treasury = address(0xcafecafe3);
+    address constant feeReceiver = address(0xcafecafe4);
 
     uint256 private nonce = 1;
 
@@ -30,8 +34,6 @@ contract VaultTest is Test, IFundVaultEvents, IChainlinkClient {
     function setUp() public {
         // Deploy USDC and LINK
         usdc = new USDC();
-        usdc.mint(alice, 1_000_000e6);
-        usdc.mint(bob, 1_000_000e6);
         link = new MockLinkToken();
 
         baseVault = new BaseVault(
@@ -41,7 +43,7 @@ contract VaultTest is Test, IFundVaultEvents, IChainlinkClient {
             1000000000000000,   // maxDeposit
             10000000000,        // minWithdraw
             1000000000000000,   // maxWithdraw
-            10,                 // targetReservesLevel
+            5,                  // targetReservesLevel
             10,                 // onchainServiceFeeRate
             50                  // offchainServiceFeeRate
         );
@@ -67,20 +69,39 @@ contract VaultTest is Test, IFundVaultEvents, IChainlinkClient {
         fundVault = new FundVault();
         fundVault.initialize(
             IERC20Upgradeable(address(usdc)),
-            vm.envAddress("OPERATOR_ADDRESS"),
-            vm.envAddress("FEE_RECEIVER_ADDRESS"),
-            vm.envAddress("TREASURY_ADDRESS"),
+            operator,
+            feeReceiver,
+            treasury,
             baseVault,
             kycManager,
             address(link),
-            vm.envAddress("CHAINLINK_ORACLE_ADDRESS"),
+            oracle,
             chainlinkParams
         );
         link.transfer(address(fundVault), 10);
+
+        usdc.mint(alice, 1_000_000e6);
+
+        // Add labels
+        vm.label(alice, "alice");
+        vm.label(bob, "bob");
+        vm.label(charlie, "charlie");
+        vm.label(oracle, "oracle");
+        vm.label(operator, "operator");
+        vm.label(treasury, "treasury");
+        vm.label(feeReceiver, "feeReceiver");
+        vm.label(address(usdc), "USDC");
+        vm.label(address(fundVault), "FundVault");
     }
 
     function getRequestId() internal returns (bytes32) {
         return keccak256(abi.encodePacked(fundVault, uint256(nonce++)));
+    }
+
+    function test_Fulfill_OnlyOracle() public {
+        vm.expectRevert("Source must be the oracle of the request");
+        vm.prank(alice);
+        fundVault.fulfill(bytes32(0), 0);
     }
 
     function test_Deposit_NoKyc() public {
@@ -99,15 +120,39 @@ contract VaultTest is Test, IFundVaultEvents, IChainlinkClient {
         vm.stopPrank();
     }
 
-    function test_Deposit_Ok() public {
+    function test_Deposit_FulfillAndTransferOut() public {
+        uint256 amount = 100_000e6;
+
         bytes32 requestId = getRequestId();
-        vm.prank(alice);
+        vm.startPrank(alice);
+        usdc.approve(address(fundVault), amount);
 
         vm.expectEmit();
         emit ChainlinkRequested(requestId);
 
         vm.expectEmit();
-        emit RequestDeposit(alice, 100_000e6, requestId);
-        assertEq(fundVault.deposit(100_000e6, alice), 0);
+        emit RequestDeposit(alice, amount, requestId);
+        assertEq(fundVault.deposit(amount, alice), 0);
+        vm.stopPrank();
+
+        vm.prank(oracle);
+        fundVault.fulfill(requestId, 0);
+
+        uint256 txFee = fundVault.getTxFee(amount);
+        assertEq(usdc.balanceOf(address(fundVault)), amount - txFee);
+        assertEq(usdc.balanceOf(feeReceiver), txFee);
+        assertGt(fundVault.balanceOf(alice), 0);
+        assertEq(fundVault.vaultNetAssets(), fundVault.totalAssets());
+        uint256 targetReserves = 5 * (amount - txFee) / 100;
+        uint256 expectedExcessReserves = fundVault.vaultNetAssets() - targetReserves;
+        assertEq(fundVault.excessReserves(), expectedExcessReserves);
+
+        vm.prank(operator);
+        fundVault.transferExcessReservesToTreasury();
+
+        assertEq(
+            usdc.balanceOf(treasury), expectedExcessReserves, "treasury balance should be > expectedExcessReserves"
+        );
+        assertEq(fundVault.vaultNetAssets(), targetReserves, "vaultNetAssets should be targetReserves");
     }
 }

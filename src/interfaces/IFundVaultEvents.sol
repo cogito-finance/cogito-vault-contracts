@@ -14,7 +14,7 @@ interface IFundVaultEvents {
     event AdvanceEpoch(uint256 onchainFeeClaimable, uint256 offchainFeeClaimable, uint256 epoch, bytes32 requestId);
     event UpdateQueueWithdrawal(address investor, uint256 shares, bytes32 requestId);
     event ProcessWithdrawalQueue(address investor, uint256 assets, uint256 shares, bytes32 requestId, bytes32 prevId);
-    event FundTBillPurchase(address treasury, uint256 assets);
+    event TransferToTreasury(address treasury, uint256 assets);
     event ProcessWithdraw(
         address receiver, uint256 assets, uint256 shares, bytes32 requestId, uint256 subAssets, uint256 subShare
     );

@@ -149,13 +149,24 @@ contract FundVault is
     }
 
     /**
-     * @dev Transfer underlying assets to treasury.
+     * Sweep all asset to treasury, keeping only the targetReservesLevel of assets
      */
-    function fundTBillPurchase(address underlying, uint256 assets) external onlyAdminOrOperator {
+    function transferExcessReservesToTreasury() external onlyAdminOrOperator {
+        uint256 amount = excessReserves();
+        require(amount > 0, "no excess reserves");
+        transferToTreasury(asset(), amount);
+    }
+
+    /**
+     * @dev Transfer any underlying assets to treasury.
+     */
+    function transferToTreasury(address underlying, uint256 amount) public onlyAdminOrOperator {
         require(_treasury != address(0), "invalid treasury");
-        require(assets <= totalAssets(), "insufficient amount");
-        SafeERC20Upgradeable.safeTransfer(IERC20Upgradeable(underlying), _treasury, assets);
-        emit FundTBillPurchase(_treasury, assets);
+        if (underlying == asset()) {
+            require(amount <= vaultNetAssets(), "insufficient amount");
+        }
+        SafeERC20Upgradeable.safeTransfer(IERC20Upgradeable(underlying), _treasury, amount);
+        emit TransferToTreasury(_treasury, amount);
     }
 
     function setMinTxFee(uint256 newValue) external onlyAdminOrOperator {
@@ -248,17 +259,26 @@ contract FundVault is
     /**
      * @notice totalAssets(): returns the amount of vault assets (eg. USDC), including fees
      *
-     * combinedNetAssets(): Returns vault + offchain assets, net fees
+     * vaultNetAssets(): Returns vault assets, net fees
      */
-    function combinedNetAssets() public view returns (uint256 assetAmt) {
-        assetAmt = _latestOffchainNAV + vaultNetAssets();
+    function vaultNetAssets() public view returns (uint256 amount) {
+        amount = totalAssets() - _onchainFee - _offchainFee;
     }
 
     /**
-     * vaultNetAssets(): Returns vault assets, net fees
+     * combinedNetAssets(): Returns vault + offchain assets, net fees
      */
-    function vaultNetAssets() public view returns (uint256 assetAmt) {
-        assetAmt = totalAssets() - _onchainFee - _offchainFee;
+    function combinedNetAssets() public view returns (uint256 amount) {
+        amount = _latestOffchainNAV + vaultNetAssets();
+    }
+
+    /**
+     * excessReserves(): Returns the amount of assets in vault above the target reserve level, or 0 if below
+     */
+    function excessReserves() public view returns (uint256 amount) {
+        uint256 targetReserves = _baseVault.getTargetReservesLevel() * combinedNetAssets() / 100;
+        uint256 currentReserves = vaultNetAssets();
+        amount = currentReserves > targetReserves ? currentReserves - targetReserves : 0;
     }
 
     /**
@@ -444,6 +464,7 @@ contract FundVault is
         if (!_initialDeposit[sender]) {
             require(assets >= initialDeposit, "amount < minimum initial deposit");
         }
+        require(IERC20Upgradeable(asset()).allowance(sender, address(this)) >= assets, "insufficient allowance");
 
         (uint256 depositAmt, uint256 withdrawAmt, uint256 delta) = getUserEpochInfo(sender, _epoch);
 
