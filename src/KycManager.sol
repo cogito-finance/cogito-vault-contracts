@@ -17,6 +17,10 @@ contract KycManager is IKycManager, Ownable {
         _;
     }
 
+    constructor(bool _strictOn) {
+        strictOn = _strictOn;
+    }
+
     ////////////////////////////////////////////////////////////
     // Grant
     ////////////////////////////////////////////////////////////

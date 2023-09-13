@@ -25,7 +25,7 @@ contract DeployFundVault is Script {
             vm.envUint("OFFCHAIN_SERVICE_FEE_RATE")
         );
 
-        kycManager = new KycManager();
+        kycManager = new KycManager(true);
 
         IChainlinkAccessor.ChainlinkParameters memory chainlinkParams = IChainlinkAccessor.ChainlinkParameters({
             jobId: vm.envBytes32("CHAINLINK_JOBID"),

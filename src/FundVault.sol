@@ -11,6 +11,7 @@ import "./interfaces/IFundVault.sol";
 import "./interfaces/IKycManager.sol";
 import "./utils/AdminOperatorRoles.sol";
 import "./utils/BytesQueue.sol";
+import "./utils/ERC1404.sol";
 
 /**
  * Represents a fund vault with offchain NAV and onchain assets for liquidity.
@@ -31,6 +32,7 @@ contract FundVault is
     PausableUpgradeable,
     ChainlinkAccessor,
     AdminOperatorRoles,
+    ERC1404,
     IFundVault
 {
     using MathUpgradeable for uint256;
@@ -377,7 +379,7 @@ contract FundVault is
     }
 
     ////////////////////////////////////////////////////////////
-    // ERC-4626 Overrides
+    // ERC-1404 Overrides
     ////////////////////////////////////////////////////////////
 
     /**
@@ -392,16 +394,31 @@ contract FundVault is
             return;
         }
 
-        _kycManager.onlyNotBanned(from);
-        _kycManager.onlyNotBanned(to);
+        uint8 restrictionCode = detectTransferRestriction(from, to, 0);
+        require(restrictionCode == SUCCESS_CODE, messageForTransferRestriction(restrictionCode));
+    }
+
+    function detectTransferRestriction(address from, address to, uint256 /*value*/ )
+        public
+        view
+        override
+        returns (uint8 restrictionCode)
+    {
+        if (_kycManager.isBanned(from)) return REVOKED_OR_BANNED_CODE;
+        else if (_kycManager.isBanned(to)) return REVOKED_OR_BANNED_CODE;
 
         if (_kycManager.isStrict()) {
-            _kycManager.onlyKyc(from);
-            _kycManager.onlyKyc(to);
+            if (!_kycManager.isKyc(from)) return DISALLOWED_OR_STOP_CODE;
+            else if (!_kycManager.isKyc(to)) return DISALLOWED_OR_STOP_CODE;
         } else if (_kycManager.isUSKyc(from)) {
-            _kycManager.onlyKyc(to);
+            if (!_kycManager.isKyc(to)) return DISALLOWED_OR_STOP_CODE;
         }
+        return SUCCESS_CODE;
     }
+
+    ////////////////////////////////////////////////////////////
+    // ERC-4626 Overrides
+    ////////////////////////////////////////////////////////////
 
     function _convertToAssets(uint256 shares, MathUpgradeable.Rounding rounding)
         internal

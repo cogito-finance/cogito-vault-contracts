@@ -7,13 +7,14 @@ import "forge-std/Test.sol";
 
 import "../src/BaseVault.sol";
 import "../src/KycManager.sol";
+import "../src/utils/ERC1404.sol";
 import "../src/FundVault.sol";
 import "../src/interfaces/IFundVaultEvents.sol";
-import "../src/interfaces/IKycManager.sol";
-import "./mock/IChainlinkClient.sol";
+import "../src/interfaces/Errors.sol";
+import "./mock/ITestEvents.sol";
 import "./mock/USDC.sol";
 
-contract VaultTest is Test, IFundVaultEvents, IChainlinkClient {
+contract VaultTest is Test, IFundVaultEvents, ITestEvents {
     USDC public usdc;
     MockLinkToken public link;
     BaseVault public baseVault;
@@ -23,6 +24,7 @@ contract VaultTest is Test, IFundVaultEvents, IChainlinkClient {
     address constant alice = address(0xdeadbeef1);
     address constant bob = address(0xdeadbeef2);
     address constant charlie = address(0xdeadbeef3);
+    address constant dprk = address(0xdeadbeef4);
     address constant oracle = address(0xcafecafe1);
     address constant operator = address(0xcafecafe2);
     address constant treasury = address(0xcafecafe3);
@@ -49,7 +51,7 @@ contract VaultTest is Test, IFundVaultEvents, IChainlinkClient {
         );
 
         // Approve alice & bob
-        kycManager = new KycManager();
+        kycManager = new KycManager(true);
         address[] memory _investors = new address[](2);
         _investors[0] = alice;
         _investors[1] = bob;
@@ -57,6 +59,9 @@ contract VaultTest is Test, IFundVaultEvents, IChainlinkClient {
         _kycTypes[0] = IKycManager.KycType.GENERAL_KYC;
         _kycTypes[1] = IKycManager.KycType.GENERAL_KYC;
         kycManager.grantKycInBulk(_investors, _kycTypes);
+        address[] memory _banned = new address[](1);
+        _banned[0] = dprk;
+        kycManager.bannedInBulk(_banned);
 
         IChainlinkAccessor.ChainlinkParameters memory chainlinkParams = IChainlinkAccessor.ChainlinkParameters({
             jobId: vm.envBytes32("CHAINLINK_JOBID"),
@@ -154,5 +159,21 @@ contract VaultTest is Test, IFundVaultEvents, IChainlinkClient {
             usdc.balanceOf(treasury), expectedExcessReserves, "treasury balance should be > expectedExcessReserves"
         );
         assertEq(fundVault.vaultNetAssets(), targetReserves, "vaultNetAssets should be targetReserves");
+
+        // Transfer: no kyc
+        vm.expectRevert(bytes(DISALLOWED_OR_STOP_MESSAGE));
+        vm.prank(alice);
+        fundVault.transfer(charlie, 1);
+
+        // Transfer: banned
+        vm.expectRevert(bytes(REVOKED_OR_BANNED_MESSAGE));
+        vm.prank(alice);
+        fundVault.transfer(dprk, 1);
+
+        // Transfer: ok
+        vm.expectEmit();
+        emit Transfer(alice, bob, 1);
+        vm.prank(alice);
+        fundVault.transfer(bob, 1);
     }
 }
