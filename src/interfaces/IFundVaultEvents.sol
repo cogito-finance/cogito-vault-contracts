@@ -16,7 +16,13 @@ interface IFundVaultEvents {
     event ProcessWithdrawalQueue(address investor, uint256 assets, uint256 shares, bytes32 requestId, bytes32 prevId);
     event TransferToTreasury(address treasury, uint256 assets);
     event ProcessWithdraw(
-        address receiver, uint256 assets, uint256 shares, bytes32 requestId, uint256 subAssets, uint256 subShare
+        address receiver,
+        uint256 requestedAssets,
+        uint256 requestedShares,
+        bytes32 requestId,
+        uint256 availableAssets,
+        uint256 actualAssets,
+        uint256 actualShares
     );
     event RedeemVault(address receiver, uint256 assets, uint256 shares);
     event ProcessDeposit(

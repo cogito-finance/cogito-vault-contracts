@@ -10,15 +10,15 @@ import "./interfaces/IBaseVault.sol";
  * Stores parameters that are used by all vaults.
  */
 contract BaseVault is Ownable, IBaseVault {
-    uint256 _transactionFee;
+    uint256 _transactionFee; // in bps
     uint256 _initialDeposit;
     uint256 _minDeposit;
     uint256 _maxDeposit;
     uint256 _minWithdraw;
     uint256 _maxWithdraw;
-    uint256 _targetReservesLevel;
-    uint256 _onchainServiceFeeRate;
-    uint256 _offchainServiceFeeRate;
+    uint256 _targetReservesLevel; // in percent
+    uint256 _onchainServiceFeeRate; // in bps
+    uint256 _offchainServiceFeeRate; // in bps
 
     constructor(
         uint256 transactionFee,

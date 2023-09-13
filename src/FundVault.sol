@@ -180,6 +180,9 @@ contract FundVault is
      */
     function claimOnchainServiceFee(uint256 amount) external onlyAdminOrOperator {
         require(_feeReceiver != address(0), "invalid feeReceiver address");
+        if (amount > _onchainFee) {
+            amount = _onchainFee;
+        }
 
         _onchainFee -= amount;
         SafeERC20Upgradeable.safeTransfer(IERC20Upgradeable(asset()), _feeReceiver, amount);
@@ -191,6 +194,9 @@ contract FundVault is
      */
     function claimOffchainServiceFee(uint256 amount) external onlyAdminOrOperator {
         require(_feeReceiver != address(0), "invalid feeReceiver address");
+        if (amount > _offchainFee) {
+            amount = _offchainFee;
+        }
 
         _offchainFee -= amount;
         SafeERC20Upgradeable.safeTransfer(IERC20Upgradeable(asset()), _feeReceiver, amount);
@@ -389,8 +395,8 @@ contract FundVault is
      * @dev will be called during: transfer, transferFrom, mint, burn
      */
     function _beforeTokenTransfer(address from, address to, uint256) internal view override {
-        // no restrictions on minting or burning
-        if (from == address(0) || to == address(0)) {
+        // no restrictions on minting or burning, or self-transfers
+        if (from == address(0) || to == address(0) || to == address(this)) {
             return;
         }
 
@@ -550,36 +556,38 @@ contract FundVault is
      * Burns shares and transfers assets to investor.
      * NOTE: If insufficient asset liquidity, then queue for later
      */
-    function _processWithdraw(address investor, uint256 shares, bytes32 requestId) internal {
-        require(shares <= balanceOf(investor), "insufficient amount");
-        uint256 currentFreeAssets = totalAssets();
-        uint256 assets = previewRedeem(shares);
+    function _processWithdraw(address investor, uint256 requestedShares, bytes32 requestId) internal {
+        require(requestedShares <= balanceOf(investor), "insufficient amount");
+        uint256 availableAssets = vaultNetAssets();
+        uint256 requestedAssets = previewRedeem(requestedShares);
 
-        uint256 actualShare = shares;
-        uint256 actualAssets = assets;
+        uint256 actualShares = requestedShares;
+        uint256 actualAssets = requestedAssets;
 
-        // Requested assets are insufficient, use all free
-        if (actualAssets > currentFreeAssets) {
-            actualAssets = currentFreeAssets;
-            actualShare = previewWithdraw(actualAssets);
+        // Requested assets are insufficient, use all available
+        if (actualAssets > availableAssets) {
+            actualAssets = availableAssets;
+            actualShares = previewWithdraw(actualAssets);
         }
 
         if (actualAssets > 0) {
-            super._withdraw(investor, investor, investor, actualAssets, actualShare);
+            super._withdraw(investor, investor, investor, actualAssets, actualShares);
         }
 
         // Queue remaining shares for later
-        if (shares > actualShare) {
-            _addToWithdrawalQueue(investor, shares - actualShare, requestId);
+        if (requestedShares > actualShares) {
+            _addToWithdrawalQueue(investor, requestedShares - actualShares, requestId);
         }
 
-        _withdrawAmount[investor][_epoch] += assets;
-        emit ProcessWithdraw(investor, assets, shares, requestId, currentFreeAssets, actualShare);
+        _withdrawAmount[investor][_epoch] += requestedAssets;
+        emit ProcessWithdraw(
+            investor, requestedAssets, requestedShares, requestId, availableAssets, actualAssets, actualShares
+        );
     }
 
     /**
      * Adds withdrawal to queue to be processed later by calling {requestWithdrawalQueue}
-     * @dev Transfers shares from investor to vault
+     * @dev Transfers shares from investor to vault. Must bypass transfer restrictions
      * @param investor withdraw user
      * @param shares the amount of assets in shares
      * @param requestId requestId in chainlinkAccessor
@@ -603,7 +611,7 @@ contract FundVault is
             uint256 assets = previewRedeem(shares);
 
             // we allow users to drain this vault by design
-            if (assets > totalAssets()) {
+            if (assets > vaultNetAssets()) {
                 return;
             }
 

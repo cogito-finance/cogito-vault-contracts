@@ -11,111 +11,28 @@ import "../src/utils/ERC1404.sol";
 import "../src/FundVault.sol";
 import "../src/interfaces/IFundVaultEvents.sol";
 import "../src/interfaces/Errors.sol";
-import "./mock/ITestEvents.sol";
+import "./mock/FundVaultFactory.sol";
 import "./mock/USDC.sol";
 
-contract VaultTest is Test, IFundVaultEvents, ITestEvents {
-    USDC public usdc;
-    MockLinkToken public link;
-    BaseVault public baseVault;
-    KycManager public kycManager;
-    FundVault public fundVault;
-
-    address constant alice = address(0xdeadbeef1);
-    address constant bob = address(0xdeadbeef2);
-    address constant charlie = address(0xdeadbeef3);
-    address constant dprk = address(0xdeadbeef4);
-    address constant oracle = address(0xcafecafe1);
-    address constant operator = address(0xcafecafe2);
-    address constant treasury = address(0xcafecafe3);
-    address constant feeReceiver = address(0xcafecafe4);
-
-    uint256 private nonce = 1;
-
-    // Set up the testing environment before each test
-    function setUp() public {
-        // Deploy USDC and LINK
-        usdc = new USDC();
-        link = new MockLinkToken();
-
-        baseVault = new BaseVault(
-            5,                  // transactionFee
-            100000000000,       // initialDeposit
-            10000000000,        // minDeposit
-            1000000000000000,   // maxDeposit
-            10000000000,        // minWithdraw
-            1000000000000000,   // maxWithdraw
-            5,                  // targetReservesLevel
-            10,                 // onchainServiceFeeRate
-            50                  // offchainServiceFeeRate
-        );
-
-        // Approve alice & bob
-        kycManager = new KycManager(true);
-        address[] memory _investors = new address[](2);
-        _investors[0] = alice;
-        _investors[1] = bob;
-        IKycManager.KycType[] memory _kycTypes = new IKycManager.KycType[](2);
-        _kycTypes[0] = IKycManager.KycType.GENERAL_KYC;
-        _kycTypes[1] = IKycManager.KycType.GENERAL_KYC;
-        kycManager.grantKycInBulk(_investors, _kycTypes);
-        address[] memory _banned = new address[](1);
-        _banned[0] = dprk;
-        kycManager.bannedInBulk(_banned);
-
-        IChainlinkAccessor.ChainlinkParameters memory chainlinkParams = IChainlinkAccessor.ChainlinkParameters({
-            jobId: vm.envBytes32("CHAINLINK_JOBID"),
-            fee: vm.envUint("CHAINLINK_FEE"),
-            urlData: vm.envString("CHAINLINK_URL_DATA"),
-            pathToOffchainAssets: vm.envString("CHAINLINK_PATH_TO_OFFCHAIN_ASSETS"),
-            pathToTotalOffchainAssetAtLastClose: vm.envString("CHAINLINK_PATH_TO_OFFCHAIN_ASSETS_AT_LAST_CLOSE")
-        });
-
-        fundVault = new FundVault();
-        fundVault.initialize(
-            IERC20Upgradeable(address(usdc)),
-            operator,
-            feeReceiver,
-            treasury,
-            baseVault,
-            kycManager,
-            address(link),
-            oracle,
-            chainlinkParams
-        );
-        link.transfer(address(fundVault), 10);
-
-        usdc.mint(alice, 1_000_000e6);
-
-        // Add labels
-        vm.label(alice, "alice");
-        vm.label(bob, "bob");
-        vm.label(charlie, "charlie");
-        vm.label(oracle, "oracle");
-        vm.label(operator, "operator");
-        vm.label(treasury, "treasury");
-        vm.label(feeReceiver, "feeReceiver");
-        vm.label(address(usdc), "USDC");
-        vm.label(address(fundVault), "FundVault");
-    }
-
-    function getRequestId() internal returns (bytes32) {
-        return keccak256(abi.encodePacked(fundVault, uint256(nonce++)));
-    }
-
-    function test_Fulfill_OnlyOracle() public {
+contract VaultTestRevert is FundVaultFactory {
+    function test_Fulfill_RevertWhenNotOracle() public {
         vm.expectRevert("Source must be the oracle of the request");
         vm.prank(alice);
         fundVault.fulfill(bytes32(0), 0);
     }
 
-    function test_Deposit_NoKyc() public {
+    function test_Deposit_RevertWhenNotOwner() public {
+        vm.expectRevert("receiver must be caller");
+        fundVault.deposit(100_000e6, alice);
+    }
+
+    function test_Deposit_RevertWhenNoKyc() public {
         vm.expectRevert("user has no kyc");
         vm.prank(charlie);
         fundVault.deposit(100_000e6, charlie);
     }
 
-    function test_Deposit_NoMinimum() public {
+    function test_Deposit_RevertWhenLessThanMinimum() public {
         vm.startPrank(alice);
         vm.expectRevert("amount < minimum deposit");
         fundVault.deposit(100e6, alice);
@@ -125,9 +42,60 @@ contract VaultTest is Test, IFundVaultEvents, ITestEvents {
         vm.stopPrank();
     }
 
-    function test_Deposit_FulfillAndTransferOut() public {
+    function test_Withdraw_RevertWhenNotOwner() public {
+        vm.expectRevert("receiver must be caller");
+        fundVault.withdraw(1, alice, alice);
+    }
+
+    function test_Withdraw_RevertWhenNoShares() public {
+        vm.startPrank(alice);
+        vm.expectRevert("withdraw more than balance");
+        fundVault.withdraw(1, alice, alice);
+    }
+
+    function test_WithdrawQueue_RevertWhenEmpty() public {
+        vm.startPrank(operator);
+        vm.expectRevert("queue is empty");
+        fundVault.requestWithdrawalQueue();
+    }
+
+    function test_Withdraw_RevertWhenLessThanMinimum() public {
+        alice_deposit(100_000e6);
+        vm.prank(alice);
+        vm.expectRevert("amount < minimum withdraw");
+        fundVault.withdraw(1, alice, alice);
+    }
+}
+
+contract VaultTestTransfer is FundVaultFactory {
+    function setUp() public {
+        alice_deposit(100_000e6);
+    }
+
+    function test_Transfers() public {
+        // no kyc
+        vm.expectRevert(bytes(DISALLOWED_OR_STOP_MESSAGE));
+        vm.prank(alice);
+        fundVault.transfer(charlie, 1);
+
+        // banned
+        vm.expectRevert(bytes(REVOKED_OR_BANNED_MESSAGE));
+        vm.prank(alice);
+        fundVault.transfer(dprk, 1);
+
+        // ok
+        vm.expectEmit();
+        emit Transfer(alice, bob, 1);
+        vm.prank(alice);
+        fundVault.transfer(bob, 1);
+    }
+}
+
+contract VaultTestDeposit is FundVaultFactory {
+    function test_Deposit_Events() public {
         uint256 amount = 100_000e6;
 
+        nextRequestId();
         bytes32 requestId = getRequestId();
         vm.startPrank(alice);
         usdc.approve(address(fundVault), amount);
@@ -143,37 +111,124 @@ contract VaultTest is Test, IFundVaultEvents, ITestEvents {
         vm.prank(oracle);
         fundVault.fulfill(requestId, 0);
 
-        uint256 txFee = fundVault.getTxFee(amount);
-        assertEq(usdc.balanceOf(address(fundVault)), amount - txFee);
-        assertEq(usdc.balanceOf(feeReceiver), txFee);
         assertGt(fundVault.balanceOf(alice), 0);
-        assertEq(fundVault.vaultNetAssets(), fundVault.totalAssets());
-        uint256 targetReserves = 5 * (amount - txFee) / 100;
-        uint256 expectedExcessReserves = fundVault.vaultNetAssets() - targetReserves;
-        assertEq(fundVault.excessReserves(), expectedExcessReserves);
+    }
+}
+
+contract VaultTestBalances is FundVaultFactory {
+    function setUp() public {
+        alice_deposit(100_000e6);
+    }
+
+    function test_DepositWithdraw() public {
+        // Balances after deposit
+        uint256 shareBalance = fundVault.balanceOf(alice);
+        assertEq(fundVault.totalSupply(), shareBalance);
+        assertEq(fundVault._latestOffchainNAV(), 0);
+        assertEq(fundVault.vaultNetAssets(), 99_950_000_000);
+        assertEq(fundVault.totalAssets(), 99_950_000_000);
+        assertEq(fundVault.combinedNetAssets(), 99_950_000_000);
+        assertEq(fundVault.excessReserves(), 94_952_500_000);
+        assertEq(usdc.balanceOf(feeReceiver), 50_000_000);
 
         vm.prank(operator);
         fundVault.transferExcessReservesToTreasury();
 
-        assertEq(
-            usdc.balanceOf(treasury), expectedExcessReserves, "treasury balance should be > expectedExcessReserves"
-        );
-        assertEq(fundVault.vaultNetAssets(), targetReserves, "vaultNetAssets should be targetReserves");
+        // Balances after transfer
+        assertEq(usdc.balanceOf(treasury), 94_952_500_000);
+        assertEq(fundVault.totalAssets(), 4_997_500_000);
+        assertEq(fundVault.vaultNetAssets(), 4_997_500_000);
+        assertEq(fundVault.combinedNetAssets(), 4_997_500_000);
+        assertEq(fundVault._onchainFee(), 0);
+        assertEq(fundVault._offchainFee(), 0);
 
-        // Transfer: no kyc
-        vm.expectRevert(bytes(DISALLOWED_OR_STOP_MESSAGE));
-        vm.prank(alice);
-        fundVault.transfer(charlie, 1);
-
-        // Transfer: banned
-        vm.expectRevert(bytes(REVOKED_OR_BANNED_MESSAGE));
-        vm.prank(alice);
-        fundVault.transfer(dprk, 1);
-
-        // Transfer: ok
+        // Advance epoch
+        nextRequestId();
         vm.expectEmit();
-        emit Transfer(alice, bob, 1);
+        emit RequestAdvanceEpoch(operator, getRequestId());
+        vm.prank(operator);
+        fundVault.requestAdvanceEpoch();
+
+        // Set NAV to 95k
+        vm.prank(oracle);
+        fundVault.fulfill(getRequestId(), 94_952_500_000);
+
+        // Balances after fee accrual
+        assertEq(fundVault._latestOffchainNAV(), 94_952_500_000);
+        assertEq(fundVault._onchainFee(), 13_691);
+        assertEq(fundVault._offchainFee(), 1_300_719);
+        assertEq(fundVault.vaultNetAssets(), 4_996_185_590);
+        assertEq(fundVault.totalAssets(), 4_997_500_000);
+        assertEq(fundVault.combinedNetAssets(), 99_950_000_000 - 13_691 - 1_300_719);
+
+        // Claim fees
+        vm.prank(operator);
+        fundVault.claimOnchainServiceFee(type(uint256).max);
+        assertEq(usdc.balanceOf(feeReceiver), 50_000_000 + 13_691);
+        assertEq(fundVault._onchainFee(), 0);
+        vm.prank(operator);
+        fundVault.claimOffchainServiceFee(type(uint256).max);
+        assertEq(usdc.balanceOf(feeReceiver), 50_000_000 + 13_691 + 1_300_719);
+        assertEq(fundVault._offchainFee(), 0);
+        assertEq(fundVault.vaultNetAssets(), 4_996_185_590);
+        assertEq(fundVault.totalAssets(), 4_996_185_590);
+        assertEq(fundVault.previewWithdraw(fundVault.combinedNetAssets()), fundVault.totalSupply());
+
+        // Withdraw 10k, ~half should be available instant
+        uint256 wantShares = fundVault.previewWithdraw(10_000e6);
+        uint256 actualShares = fundVault.previewWithdraw(4_996_185_590);
+
+        // Withdraw.1
+        nextRequestId();
         vm.prank(alice);
-        fundVault.transfer(bob, 1);
+        assertEq(fundVault.withdraw(wantShares, alice, alice), 0);
+
+        // Withdraw.2
+        vm.expectEmit();
+        emit Transfer(alice, address(0), actualShares);
+        vm.expectEmit();
+        emit Transfer(alice, address(fundVault), wantShares - actualShares);
+        vm.prank(oracle);
+        fundVault.fulfill(getRequestId(), 94_952_500_000);
+
+        // Balances after withdraw
+        assertEq(fundVault.totalAssets(), 0);
+        assertEq(usdc.balanceOf(alice), 4_996_185_590);
+        assertEq(fundVault.balanceOf(alice), shareBalance - wantShares);
+        (, uint256 withdrawAmt,) = fundVault.getUserEpochInfo(alice, 1);
+        assertEq(withdrawAmt, 10_000e6);
+        assertEq(fundVault.getWithdrawalQueueLength(), 1);
+
+        // Attempt to process queue: no change in assets
+        nextRequestId();
+        vm.expectEmit();
+        emit RequestWithdrawalQueue(operator, getRequestId());
+        vm.prank(operator);
+        fundVault.requestWithdrawalQueue();
+        vm.prank(oracle);
+        fundVault.fulfill(getRequestId(), 94_952_500_000);
+
+        // Balances should not change
+        assertEq(fundVault.totalAssets(), 0);
+        assertEq(usdc.balanceOf(alice), 4_996_185_590);
+        assertEq(fundVault.getWithdrawalQueueLength(), 1);
+
+        // Attempt to process queue: after moving 10k from offchain to vault
+        vm.prank(treasury);
+        usdc.transfer(address(fundVault), 10_000e6);
+
+        nextRequestId();
+        vm.prank(operator);
+        fundVault.requestWithdrawalQueue();
+        vm.prank(oracle);
+        fundVault.fulfill(getRequestId(), 84_952_500_000);
+
+        // Balances after completing withdraw
+        assertApproxEqAbs(fundVault.totalAssets(), 4_996_185_590, 10);
+        assertApproxEqAbs(usdc.balanceOf(alice), 10_000e6, 10);
+        assertEq(fundVault.getWithdrawalQueueLength(), 0);
+        assertEq(fundVault.balanceOf(alice), shareBalance - wantShares);
+        assertEq(fundVault.totalSupply(), shareBalance - wantShares);
+        assertEq(fundVault.previewWithdraw(fundVault.combinedNetAssets()), fundVault.totalSupply());
     }
 }
