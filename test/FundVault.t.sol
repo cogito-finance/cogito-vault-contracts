@@ -7,14 +7,18 @@ import "forge-std/Test.sol";
 
 import "../src/BaseVault.sol";
 import "../src/KycManager.sol";
-import "../src/utils/ERC1404.sol";
 import "../src/FundVault.sol";
 import "../src/interfaces/IFundVaultEvents.sol";
 import "../src/interfaces/Errors.sol";
-import "./mock/FundVaultFactory.sol";
-import "./mock/USDC.sol";
+import "../src/utils/ERC1404.sol";
+import "./helpers/FundVaultFactory.sol";
+import "../src/mocks/USDC.sol";
 
-contract VaultTestRevert is FundVaultFactory {
+contract VaultTestBasic is FundVaultFactory {
+    function test_Decimals() public {
+        assertEq(fundVault.decimals(), 6);
+    }
+
     function test_Fulfill_RevertWhenNotOracle() public {
         vm.expectRevert("Source must be the oracle of the request");
         vm.prank(alice);
@@ -22,47 +26,47 @@ contract VaultTestRevert is FundVaultFactory {
     }
 
     function test_Deposit_RevertWhenNotOwner() public {
-        vm.expectRevert("receiver must be caller");
+        vm.expectRevert(abi.encodeWithSelector(InvalidAddress.selector, alice));
         fundVault.deposit(100_000e6, alice);
     }
 
     function test_Deposit_RevertWhenNoKyc() public {
-        vm.expectRevert("user has no kyc");
+        vm.expectRevert(abi.encodeWithSelector(UserMissingKyc.selector, charlie));
         vm.prank(charlie);
         fundVault.deposit(100_000e6, charlie);
     }
 
     function test_Deposit_RevertWhenLessThanMinimum() public {
         vm.startPrank(alice);
-        vm.expectRevert("amount < minimum deposit");
+        vm.expectRevert(abi.encodeWithSelector(MinimumDepositRequired.selector, 10_000e6));
         fundVault.deposit(100e6, alice);
 
-        vm.expectRevert("amount < minimum initial deposit");
+        vm.expectRevert(abi.encodeWithSelector(MinimumInitialDepositRequired.selector, 100_000e6));
         fundVault.deposit(10_000e6, alice);
         vm.stopPrank();
     }
 
     function test_Withdraw_RevertWhenNotOwner() public {
-        vm.expectRevert("receiver must be caller");
+        vm.expectRevert(abi.encodeWithSelector(InvalidAddress.selector, alice));
         fundVault.withdraw(1, alice, alice);
     }
 
     function test_Withdraw_RevertWhenNoShares() public {
         vm.startPrank(alice);
-        vm.expectRevert("withdraw more than balance");
+        vm.expectRevert(abi.encodeWithSelector(InsufficientBalance.selector, 0, 1));
         fundVault.withdraw(1, alice, alice);
     }
 
     function test_WithdrawQueue_RevertWhenEmpty() public {
         vm.startPrank(operator);
-        vm.expectRevert("queue is empty");
+        vm.expectRevert(WithdrawQueueEmpty.selector);
         fundVault.requestWithdrawalQueue();
     }
 
     function test_Withdraw_RevertWhenLessThanMinimum() public {
         alice_deposit(100_000e6);
         vm.prank(alice);
-        vm.expectRevert("amount < minimum withdraw");
+        vm.expectRevert(abi.encodeWithSelector(MinimumWithdrawRequired.selector, 10_000e6));
         fundVault.withdraw(1, alice, alice);
     }
 }

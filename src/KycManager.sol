@@ -3,6 +3,7 @@ pragma solidity ^0.8.19;
 
 import "openzeppelin-contracts/access/Ownable.sol";
 
+import "./interfaces/Errors.sol";
 import "./interfaces/IKycManager.sol";
 
 /**
@@ -13,7 +14,9 @@ contract KycManager is IKycManager, Ownable {
     bool strictOn;
 
     modifier onlyNonZeroAddress(address _investor) {
-        require(_investor != address(0), "invalid address");
+        if (_investor == address(0)) {
+            revert InvalidAddress(_investor);
+        }
         _;
     }
 
@@ -96,11 +99,15 @@ contract KycManager is IKycManager, Ownable {
     }
 
     function onlyNotBanned(address _investor) external view {
-        require(!userList[_investor].isBanned, "user is banned");
+        if (userList[_investor].isBanned) {
+            revert UserBanned(_investor);
+        }
     }
 
     function onlyKyc(address _investor) external view {
-        require(KycType.NON_KYC != userList[_investor].kycType, "user has no kyc");
+        if (KycType.NON_KYC == userList[_investor].kycType) {
+            revert UserMissingKyc(_investor);
+        }
     }
 
     function isBanned(address _investor) external view returns (bool) {

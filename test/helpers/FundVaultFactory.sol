@@ -11,8 +11,8 @@ import "../../src/utils/ERC1404.sol";
 import "../../src/FundVault.sol";
 import "../../src/interfaces/IFundVaultEvents.sol";
 import "../../src/interfaces/Errors.sol";
-import "../mock/ITestEvents.sol";
-import "../mock/USDC.sol";
+import "../../src/mocks/USDC.sol";
+import "./ITestEvents.sol";
 
 contract FundVaultFactory is Test, IFundVaultEvents, ITestEvents {
     USDC public usdc;
@@ -83,7 +83,7 @@ contract FundVaultFactory is Test, IFundVaultEvents, ITestEvents {
             oracle,
             chainlinkParams
         );
-        link.transfer(address(fundVault), 10);
+        link.transfer(address(fundVault), 100e18);
 
         usdc.mint(alice, 100_000e6);
 

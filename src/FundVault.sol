@@ -140,7 +140,9 @@ contract FundVault is
      * @dev Handled in {_processWithdrawalQueue}
      */
     function requestWithdrawalQueue() external onlyAdminOrOperator {
-        require(!_withdrawalQueue.empty(), "queue is empty");
+        if (_withdrawalQueue.empty()) {
+            revert WithdrawQueueEmpty();
+        }
 
         bytes32 requestId = super._requestTotalOffchainNAV(_msgSender(), 0, Action.WITHDRAW_QUEUE, decimals());
 
@@ -152,7 +154,10 @@ contract FundVault is
      */
     function transferExcessReservesToTreasury() external onlyAdminOrOperator {
         uint256 amount = excessReserves();
-        require(amount > 0, "no excess reserves");
+        if (amount == 0) {
+            revert NoExcessReserves();
+        }
+
         transferToTreasury(asset(), amount);
     }
 
@@ -160,10 +165,14 @@ contract FundVault is
      * Transfers any underlying assets to {_treasury}.
      */
     function transferToTreasury(address underlying, uint256 amount) public onlyAdminOrOperator {
-        require(_treasury != address(0), "invalid treasury");
-        if (underlying == asset()) {
-            require(amount <= vaultNetAssets(), "insufficient amount");
+        if (_treasury == address(0)) {
+            revert InvalidAddress(_treasury);
         }
+
+        if (underlying == asset() && amount > vaultNetAssets()) {
+            revert InsufficientBalance(vaultNetAssets(), amount);
+        }
+
         SafeERC20Upgradeable.safeTransfer(IERC20Upgradeable(underlying), _treasury, amount);
         emit TransferToTreasury(_treasury, amount);
     }
@@ -179,7 +188,10 @@ contract FundVault is
      * Sends the accumulated onchain service fee to {_feeReceiver}
      */
     function claimOnchainServiceFee(uint256 amount) external onlyAdminOrOperator {
-        require(_feeReceiver != address(0), "invalid feeReceiver address");
+        if (_feeReceiver == address(0)) {
+            revert InvalidAddress(_feeReceiver);
+        }
+
         if (amount > _onchainFee) {
             amount = _onchainFee;
         }
@@ -193,7 +205,10 @@ contract FundVault is
      * Sends the accumulated offchain service fee to {_feeReceiver}
      */
     function claimOffchainServiceFee(uint256 amount) external onlyAdminOrOperator {
-        require(_feeReceiver != address(0), "invalid feeReceiver address");
+        if (_feeReceiver == address(0)) {
+            revert InvalidAddress(_feeReceiver);
+        }
+
         if (amount > _offchainFee) {
             amount = _offchainFee;
         }
@@ -493,21 +508,31 @@ contract FundVault is
         (uint256 minDeposit, uint256 maxDeposit) = _baseVault.getMinMaxDeposit();
         uint256 initialDeposit = _baseVault.getInitialDeposit();
 
-        require(assets <= _getAssetBalance(sender), "insufficient balance");
-        require(assets >= minDeposit, "amount < minimum deposit");
-        if (!_initialDeposit[sender]) {
-            require(assets >= initialDeposit, "amount < minimum initial deposit");
+        if (assets > _getAssetBalance(sender)) {
+            revert InsufficientBalance(_getAssetBalance(sender), assets);
         }
-        require(IERC20Upgradeable(asset()).allowance(sender, address(this)) >= assets, "insufficient allowance");
+        if (assets < minDeposit) {
+            revert MinimumDepositRequired(minDeposit);
+        }
+        if (!_initialDeposit[sender] && assets < initialDeposit) {
+            revert MinimumInitialDepositRequired(initialDeposit);
+        }
+        if (IERC20Upgradeable(asset()).allowance(sender, address(this)) < assets) {
+            revert InsufficientAllowance(IERC20Upgradeable(asset()).allowance(sender, address(this)), assets);
+        }
 
         (uint256 depositAmt, uint256 withdrawAmt, uint256 delta) = getUserEpochInfo(sender, _epoch);
 
         if (depositAmt >= withdrawAmt) {
             // Net deposit
-            require(assets <= maxDeposit - delta, "exceeds max deposit 1");
+            if (assets > maxDeposit - delta) {
+                revert MaximumDepositExceeded(maxDeposit);
+            }
         } else {
             // Net withdraw
-            require(assets <= maxDeposit + delta, "exceeds max deposit 2");
+            if (assets > maxDeposit + delta) {
+                revert MaximumDepositExceeded(maxDeposit);
+            }
         }
     }
 
@@ -534,21 +559,31 @@ contract FundVault is
      * Ensures withdraw amount is within limits
      */
     function _validateWithdraw(address sender, uint256 share) internal view virtual {
-        require(share <= balanceOf(sender), "withdraw more than balance");
-        require(share > 0, "withdraw invalid amount");
+        if (share > balanceOf(sender)) {
+            revert InsufficientBalance(balanceOf(sender), share);
+        }
+        if (share == 0) {
+            revert InvalidAmount(share);
+        }
 
         (uint256 minWithdraw, uint256 maxWithdraw) = _baseVault.getMinMaxWithdraw();
         uint256 assets = previewRedeem(share);
-        require(assets >= minWithdraw, "amount < minimum withdraw");
+        if (assets < minWithdraw) {
+            revert MinimumWithdrawRequired(minWithdraw);
+        }
 
         (uint256 depositAmt, uint256 withdrawAmt, uint256 delta) = getUserEpochInfo(sender, _epoch);
 
         if (depositAmt >= withdrawAmt) {
             // Net deposit
-            require(assets <= maxWithdraw + delta, "exceeds max withdraw 1");
+            if (assets > maxWithdraw + delta) {
+                revert MaximumWithdrawExceeded(maxWithdraw);
+            }
         } else {
             // Net withdraw
-            require(assets <= maxWithdraw - delta, "exceeds max withdraw 2");
+            if (assets > maxWithdraw - delta) {
+                revert MaximumWithdrawExceeded(maxWithdraw);
+            }
         }
     }
 
@@ -557,7 +592,9 @@ contract FundVault is
      * NOTE: If insufficient asset liquidity, then queue for later
      */
     function _processWithdraw(address investor, uint256 requestedShares, bytes32 requestId) internal {
-        require(requestedShares <= balanceOf(investor), "insufficient amount");
+        if (requestedShares > balanceOf(investor)) {
+            revert InsufficientBalance(balanceOf(investor), requestedShares);
+        }
         uint256 availableAssets = vaultNetAssets();
         uint256 requestedAssets = previewRedeem(requestedShares);
 
@@ -576,27 +613,16 @@ contract FundVault is
 
         // Queue remaining shares for later
         if (requestedShares > actualShares) {
-            _addToWithdrawalQueue(investor, requestedShares - actualShares, requestId);
+            uint256 remainingShares = requestedShares - actualShares;
+            _withdrawalQueue.pushBack(abi.encode(investor, remainingShares, requestId));
+            super._transfer(investor, address(this), remainingShares);
+            emit UpdateQueueWithdrawal(investor, remainingShares, requestId);
         }
 
         _withdrawAmount[investor][_epoch] += requestedAssets;
         emit ProcessWithdraw(
             investor, requestedAssets, requestedShares, requestId, availableAssets, actualAssets, actualShares
         );
-    }
-
-    /**
-     * Adds withdrawal to queue to be processed later by calling {requestWithdrawalQueue}
-     * @dev Transfers shares from investor to vault. Must bypass transfer restrictions
-     * @param investor withdraw user
-     * @param shares the amount of assets in shares
-     * @param requestId requestId in chainlinkAccessor
-     */
-    function _addToWithdrawalQueue(address investor, uint256 shares, bytes32 requestId) internal {
-        bytes memory data = abi.encode(investor, shares, requestId);
-        _withdrawalQueue.pushBack(data);
-        super._transfer(investor, address(this), shares);
-        emit UpdateQueueWithdrawal(investor, shares, requestId);
     }
 
     /**

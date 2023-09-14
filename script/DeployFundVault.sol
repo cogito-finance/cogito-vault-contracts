@@ -3,6 +3,7 @@ pragma solidity ^0.8.19;
 
 import "forge-std/Script.sol";
 
+import "../src/mocks/USDC.sol";
 import "../src/BaseVault.sol";
 import "../src/KycManager.sol";
 import "../src/FundVault.sol";
@@ -13,6 +14,13 @@ contract DeployFundVault is Script {
     FundVault public fundVault;
 
     function run() external {
+        string memory network = vm.envOr("NETWORK", string("localhost"));
+
+        // TODO: Handle private keys better
+        // address deployer = vm.envAddress("DEPLOYER");
+        uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
+        vm.startBroadcast(deployerPrivateKey);
+
         baseVault = new BaseVault(
             vm.envUint("TRANSACTION_FEE"),
             vm.envUint("INITIAL_DEPOSIT"),
@@ -35,9 +43,11 @@ contract DeployFundVault is Script {
             pathToTotalOffchainAssetAtLastClose: vm.envString("CHAINLINK_PATH_TO_OFFCHAIN_ASSETS_AT_LAST_CLOSE")
         });
 
+        USDC usdc = new USDC();
+
         fundVault = new FundVault();
         fundVault.initialize(
-            IERC20Upgradeable(vm.envAddress("USDC_ADDRESS")),
+            IERC20Upgradeable(address(usdc)),
             vm.envAddress("OPERATOR_ADDRESS"),
             vm.envAddress("FEE_RECEIVER_ADDRESS"),
             vm.envAddress("TREASURY_ADDRESS"),
@@ -47,5 +57,17 @@ contract DeployFundVault is Script {
             vm.envAddress("CHAINLINK_ORACLE_ADDRESS"),
             chainlinkParams
         );
+
+        vm.stopBroadcast();
+
+        // Write to json
+        string memory json = "json";
+        vm.serializeAddress(json, "BaseVault", address(baseVault));
+        vm.serializeAddress(json, "KycManager", address(kycManager));
+        vm.serializeAddress(json, "FundVault", address(fundVault));
+        string memory finalJson = vm.serializeAddress(json, "USDC", address(usdc));
+        string memory file = string.concat("./deploy/", network, ".json");
+        vm.writeJson(finalJson, file);
+        console.log("Contract addresses saved to %s", file);
     }
 }
