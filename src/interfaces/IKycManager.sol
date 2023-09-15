@@ -8,7 +8,14 @@ interface IKycManager {
         GENERAL_KYC
     }
 
+    struct UserAddress {
+        address user;
+        KycType kycType;
+        bool isBanned;
+    }
+
     struct User {
+        bool exists;
         KycType kycType;
         bool isBanned;
     }

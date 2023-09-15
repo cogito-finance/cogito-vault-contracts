@@ -10,7 +10,9 @@ import "./interfaces/IKycManager.sol";
  * Handles address permissions. An address can be KYCed for US or non-US purposes. Additionally, an address may be banned
  */
 contract KycManager is IKycManager, Ownable {
-    mapping(address => User) userList;
+    mapping(address => User) userData;
+    address[] public userList;
+    uint16 userCount = 0;
     bool strictOn;
 
     modifier onlyNonZeroAddress(address _investor) {
@@ -28,7 +30,7 @@ contract KycManager is IKycManager, Ownable {
     // Grant
     ////////////////////////////////////////////////////////////
 
-    function grantKycInBulk(address[] calldata _investors, KycType[] calldata _kycTypes) external onlyOwner {
+    function bulkGrantKyc(address[] calldata _investors, KycType[] calldata _kycTypes) external onlyOwner {
         require(_investors.length == _kycTypes.length, "invalid input");
         for (uint256 i = 0; i < _investors.length; i++) {
             _grantKyc(_investors[i], _kycTypes[i]);
@@ -38,8 +40,8 @@ contract KycManager is IKycManager, Ownable {
     function _grantKyc(address _investor, KycType _kycType) internal onlyNonZeroAddress(_investor) {
         require(KycType.US_KYC == _kycType || KycType.GENERAL_KYC == _kycType, "invalid kyc type");
 
-        User storage user = userList[_investor];
-        user.kycType = _kycType;
+        _addUserIfNotExist(_investor);
+        userData[_investor].kycType = _kycType;
         emit GrantKyc(_investor, _kycType);
     }
 
@@ -47,14 +49,15 @@ contract KycManager is IKycManager, Ownable {
     // Revoke
     ////////////////////////////////////////////////////////////
 
-    function revokeKycInBulk(address[] calldata _investors) external onlyOwner {
+    function bulkRevokeKyc(address[] calldata _investors) external onlyOwner {
         for (uint256 i = 0; i < _investors.length; i++) {
             _revokeKyc(_investors[i]);
         }
     }
 
     function _revokeKyc(address _investor) internal onlyNonZeroAddress(_investor) {
-        User storage user = userList[_investor];
+        _addUserIfNotExist(_investor);
+        User storage user = userData[_investor];
         emit RevokeKyc(_investor, user.kycType);
         user.kycType = KycType.NON_KYC;
     }
@@ -63,9 +66,9 @@ contract KycManager is IKycManager, Ownable {
     // Ban
     ////////////////////////////////////////////////////////////
 
-    function bannedInBulk(address[] calldata _investors) external onlyOwner {
+    function bulkBan(address[] calldata _investors) external onlyOwner {
         for (uint256 i = 0; i < _investors.length; i++) {
-            _bannedInternal(_investors[i], true);
+            _setBanned(_investors[i], true);
         }
     }
 
@@ -73,15 +76,14 @@ contract KycManager is IKycManager, Ownable {
     // Unban
     ////////////////////////////////////////////////////////////
 
-    function unBannedInBulk(address[] calldata _investors) external onlyOwner {
+    function bulkUnBan(address[] calldata _investors) external onlyOwner {
         for (uint256 i = 0; i < _investors.length; i++) {
-            _bannedInternal(_investors[i], false);
+            _setBanned(_investors[i], false);
         }
     }
 
-    function _bannedInternal(address _investor, bool _status) internal onlyNonZeroAddress(_investor) {
-        User storage user = userList[_investor];
-        user.isBanned = _status;
+    function _setBanned(address _investor, bool _status) internal onlyNonZeroAddress(_investor) {
+        userData[_investor].isBanned = _status;
         emit Banned(_investor, _status);
     }
 
@@ -95,38 +97,62 @@ contract KycManager is IKycManager, Ownable {
     ////////////////////////////////////////////////////////////
 
     function getUserInfo(address _investor) external view returns (User memory user) {
-        user = userList[_investor];
+        user = userData[_investor];
+    }
+
+    function getAllUsers() external view returns (address[] memory) {
+        return userList;
+    }
+
+    function getAllUserInfo() external view returns (UserAddress[] memory info) {
+        info = new UserAddress[](userCount);
+        for (uint16 i = 0; i < userCount; i++) {
+            address user = userList[i];
+            User storage data = userData[user];
+            info[i].user = user;
+            info[i].kycType = data.kycType;
+            info[i].isBanned = data.isBanned;
+        }
+        return info;
     }
 
     function onlyNotBanned(address _investor) external view {
-        if (userList[_investor].isBanned) {
+        if (userData[_investor].isBanned) {
             revert UserBanned(_investor);
         }
     }
 
     function onlyKyc(address _investor) external view {
-        if (KycType.NON_KYC == userList[_investor].kycType) {
+        if (KycType.NON_KYC == userData[_investor].kycType) {
             revert UserMissingKyc(_investor);
         }
     }
 
     function isBanned(address _investor) external view returns (bool) {
-        return userList[_investor].isBanned;
+        return userData[_investor].isBanned;
     }
 
     function isKyc(address _investor) external view returns (bool) {
-        return KycType.NON_KYC != userList[_investor].kycType;
+        return KycType.NON_KYC != userData[_investor].kycType;
     }
 
     function isUSKyc(address _investor) external view returns (bool) {
-        return KycType.US_KYC == userList[_investor].kycType;
+        return KycType.US_KYC == userData[_investor].kycType;
     }
 
     function isNonUSKyc(address _investor) external view returns (bool) {
-        return KycType.GENERAL_KYC == userList[_investor].kycType;
+        return KycType.GENERAL_KYC == userData[_investor].kycType;
     }
 
     function isStrict() external view returns (bool) {
         return strictOn;
+    }
+
+    function _addUserIfNotExist(address user) internal {
+        if (!userData[user].exists) {
+            userList.push(user);
+            userData[user].exists = true;
+            ++userCount;
+        }
     }
 }

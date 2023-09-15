@@ -58,10 +58,10 @@ contract FundVaultFactory is Test, IFundVaultEvents, ITestEvents {
         IKycManager.KycType[] memory _kycTypes = new IKycManager.KycType[](2);
         _kycTypes[0] = IKycManager.KycType.GENERAL_KYC;
         _kycTypes[1] = IKycManager.KycType.GENERAL_KYC;
-        kycManager.grantKycInBulk(_investors, _kycTypes);
+        kycManager.bulkGrantKyc(_investors, _kycTypes);
         address[] memory _banned = new address[](1);
         _banned[0] = dprk;
-        kycManager.bannedInBulk(_banned);
+        kycManager.bulkBan(_banned);
 
         IChainlinkAccessor.ChainlinkParameters memory chainlinkParams = IChainlinkAccessor.ChainlinkParameters({
             jobId: vm.envBytes32("CHAINLINK_JOBID"),

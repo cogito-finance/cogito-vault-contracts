@@ -334,8 +334,7 @@ contract FundVault is
      * Returns the maximum of the calculated fee and the minimum fee.
      */
     function getTxFee(uint256 assets) public view returns (uint256) {
-        uint256 fee = (assets * _baseVault.getTransactionFee()) / BPS_UNIT;
-        return fee < _minTxFee ? _minTxFee : fee;
+        return _minTxFee.max((assets * _baseVault.getTransactionFee()) / BPS_UNIT);
     }
 
     // TODO: What are these used for?
@@ -380,14 +379,14 @@ contract FundVault is
      * vaultNetAssets(): Returns vault assets, net fees
      */
     function vaultNetAssets() public view returns (uint256 amount) {
-        amount = totalAssets() - _onchainFee - _offchainFee;
+        return uint256(0).max(totalAssets() - _onchainFee - _offchainFee);
     }
 
     /**
      * combinedNetAssets(): Returns vault + offchain assets, net fees
      */
     function combinedNetAssets() public view returns (uint256 amount) {
-        amount = _latestOffchainNAV + vaultNetAssets();
+        return _latestOffchainNAV + vaultNetAssets();
     }
 
     /**
@@ -396,7 +395,7 @@ contract FundVault is
     function excessReserves() public view returns (uint256 amount) {
         uint256 targetReserves = _baseVault.getTargetReservesLevel() * combinedNetAssets() / 100;
         uint256 currentReserves = vaultNetAssets();
-        amount = currentReserves > targetReserves ? currentReserves - targetReserves : 0;
+        return currentReserves - targetReserves.max(0);
     }
 
     ////////////////////////////////////////////////////////////
