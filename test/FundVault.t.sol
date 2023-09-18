@@ -48,26 +48,26 @@ contract VaultTestBasic is FundVaultFactory {
 
     function test_Withdraw_RevertWhenNotOwner() public {
         vm.expectRevert(abi.encodeWithSelector(InvalidAddress.selector, alice));
-        fundVault.withdraw(1, alice, alice);
+        fundVault.redeem(1, alice, alice);
     }
 
     function test_Withdraw_RevertWhenNoShares() public {
         vm.startPrank(alice);
         vm.expectRevert(abi.encodeWithSelector(InsufficientBalance.selector, 0, 1));
-        fundVault.withdraw(1, alice, alice);
+        fundVault.redeem(1, alice, alice);
     }
 
-    function test_WithdrawQueue_RevertWhenEmpty() public {
+    function test_RedemptionQueue_RevertWhenEmpty() public {
         vm.startPrank(operator);
-        vm.expectRevert(WithdrawQueueEmpty.selector);
-        fundVault.requestWithdrawalQueue();
+        vm.expectRevert(RedemptionQueueEmpty.selector);
+        fundVault.requestRedemptionQueue();
     }
 
     function test_Withdraw_RevertWhenLessThanMinimum() public {
         alice_deposit(100_000e6);
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(MinimumWithdrawRequired.selector, 10_000e6));
-        fundVault.withdraw(1, alice, alice);
+        fundVault.redeem(1, alice, alice);
     }
 }
 
@@ -185,7 +185,7 @@ contract VaultTestBalances is FundVaultFactory {
         // Withdraw.1
         nextRequestId();
         vm.prank(alice);
-        assertEq(fundVault.withdraw(wantShares, alice, alice), 0);
+        assertEq(fundVault.redeem(wantShares, alice, alice), 0);
 
         // Withdraw.2
         vm.expectEmit();
@@ -201,21 +201,21 @@ contract VaultTestBalances is FundVaultFactory {
         assertEq(fundVault.balanceOf(alice), shareBalance - wantShares);
         (, uint256 withdrawAmt,) = fundVault.getUserEpochInfo(alice, 1);
         assertEq(withdrawAmt, 10_000e6);
-        assertEq(fundVault.getWithdrawalQueueLength(), 1);
+        assertEq(fundVault.getRedemptionQueueLength(), 1);
 
         // Attempt to process queue: no change in assets
         nextRequestId();
         vm.expectEmit();
-        emit RequestWithdrawalQueue(operator, getRequestId());
+        emit RequestRedemptionQueue(operator, getRequestId());
         vm.prank(operator);
-        fundVault.requestWithdrawalQueue();
+        fundVault.requestRedemptionQueue();
         vm.prank(oracle);
         fundVault.fulfill(getRequestId(), 94_952_500_000);
 
         // Balances should not change
         assertEq(fundVault.totalAssets(), 0);
         assertEq(usdc.balanceOf(alice), 4_996_185_590);
-        assertEq(fundVault.getWithdrawalQueueLength(), 1);
+        assertEq(fundVault.getRedemptionQueueLength(), 1);
 
         // Attempt to process queue: after moving 10k from offchain to vault
         vm.prank(treasury);
@@ -223,14 +223,14 @@ contract VaultTestBalances is FundVaultFactory {
 
         nextRequestId();
         vm.prank(operator);
-        fundVault.requestWithdrawalQueue();
+        fundVault.requestRedemptionQueue();
         vm.prank(oracle);
         fundVault.fulfill(getRequestId(), 84_952_500_000);
 
         // Balances after completing withdraw
         assertApproxEqAbs(fundVault.totalAssets(), 4_996_185_590, 10);
         assertApproxEqAbs(usdc.balanceOf(alice), 10_000e6, 10);
-        assertEq(fundVault.getWithdrawalQueueLength(), 0);
+        assertEq(fundVault.getRedemptionQueueLength(), 0);
         assertEq(fundVault.balanceOf(alice), shareBalance - wantShares);
         assertEq(fundVault.totalSupply(), shareBalance - wantShares);
         assertEq(fundVault.previewWithdraw(fundVault.combinedNetAssets()), fundVault.totalSupply());

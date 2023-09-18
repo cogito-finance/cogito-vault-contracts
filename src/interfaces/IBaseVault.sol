@@ -5,7 +5,7 @@ import "./Action.sol";
 
 interface IBaseVault {
     event SetTransactionFee(uint256 transactionFee);
-    event SetFirsetDeposit(uint256 initialDeposit);
+    event SetInitialDeposit(uint256 initialDeposit);
     event SetMinDeposit(uint256 minDeposit);
     event SetMaxDeposit(uint256 maxDeposit);
     event SetMinWithdraw(uint256 minWithdraw);
@@ -13,7 +13,6 @@ interface IBaseVault {
     event SetTargetReservesLevel(uint256 targetReservesLevel);
     event SetOnchainServiceFeeRate(uint256 onchainServiceFeeRate);
     event SetOffchainServiceFeeRate(uint256 offchainServiceFeeRate);
-    event SetInitialDeposit(uint256 initialDeposit);
 
     function getTransactionFee() external view returns (uint256 txFee);
 

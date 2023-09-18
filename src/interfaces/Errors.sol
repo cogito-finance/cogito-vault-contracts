@@ -18,7 +18,7 @@ error InvalidAddress(address addr);
 error InvalidAmount(uint256 amount);
 error UserMissingKyc(address user);
 error UserBanned(address user);
-error WithdrawQueueEmpty();
+error RedemptionQueueEmpty();
 error NoExcessReserves();
 error InsufficientBalance(uint256 current, uint256 needed);
 error InsufficientAllowance(uint256 current, uint256 needed);

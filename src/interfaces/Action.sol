@@ -3,9 +3,9 @@ pragma solidity ^0.8.19;
 
 enum Action {
     DEPOSIT,
-    WITHDRAW,
+    REDEEM,
     ADVANCE_EPOCH,
-    WITHDRAW_QUEUE
+    REDEMPTION_QUEUE
 }
 
 struct VaultParameters {

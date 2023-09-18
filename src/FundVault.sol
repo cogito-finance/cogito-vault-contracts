@@ -23,7 +23,7 @@ import "./utils/ERC1404.sol";
  *
  * ## Operator Workflow
  * - Call {requestAdvanceEpoch} after each NAV report is published to update {_latestOffchainNAV}
- * - Call {requestWithdrawalQueue} after assets have been deposited back into the vault to process queued withdraws
+ * - Call {requestRedemptionQueue} after assets have been deposited back into the vault to process queued redemptions
  * - Call {transferToTreasury} after deposits to move offchain
  */
 contract FundVault is
@@ -38,7 +38,7 @@ contract FundVault is
     using MathUpgradeable for uint256;
     using BytesQueue for BytesQueue.BytesDeque;
 
-    BytesQueue.BytesDeque _withdrawalQueue;
+    BytesQueue.BytesDeque _redemptionQueue;
     uint256 public _latestOffchainNAV;
 
     uint256 private constant BPS_UNIT = 10000;
@@ -55,8 +55,8 @@ contract FundVault is
     IKycManager public _kycManager;
 
     mapping(address => bool) public _initialDeposit;
-    mapping(address => mapping(uint256 => uint256)) _depositAmount; // account => [epoch => depositAmount]
-    mapping(address => mapping(uint256 => uint256)) _withdrawAmount; // account => [epoch => depositAmount]
+    mapping(address => mapping(uint256 => uint256)) _depositAmount; // account => [epoch => amount]
+    mapping(address => mapping(uint256 => uint256)) _withdrawAmount; // account => [epoch => amount]
 
     ////////////////////////////////////////////////////////////
     // Init
@@ -99,7 +99,7 @@ contract FundVault is
 
     function setTreasury(address newAddress) external onlyAdmin {
         _treasury = newAddress;
-        emit UpdateTreasury(newAddress);
+        emit SetTreasury(newAddress);
     }
 
     function setBaseVault(address baseVault) external onlyAdmin {
@@ -136,17 +136,17 @@ contract FundVault is
     }
 
     /**
-     * Call after sufficient assets have been returned to the vault to process withdraws.
-     * @dev Handled in {_processWithdrawalQueue}
+     * Call after sufficient assets have been returned to the vault to process redemptions.
+     * @dev Handled in {_processRedemptionQueue}
      */
-    function requestWithdrawalQueue() external onlyAdminOrOperator {
-        if (_withdrawalQueue.empty()) {
-            revert WithdrawQueueEmpty();
+    function requestRedemptionQueue() external onlyAdminOrOperator {
+        if (_redemptionQueue.empty()) {
+            revert RedemptionQueueEmpty();
         }
 
-        bytes32 requestId = super._requestTotalOffchainNAV(_msgSender(), 0, Action.WITHDRAW_QUEUE, decimals());
+        bytes32 requestId = super._requestTotalOffchainNAV(_msgSender(), 0, Action.REDEMPTION_QUEUE, decimals());
 
-        emit RequestWithdrawalQueue(msg.sender, requestId);
+        emit RequestRedemptionQueue(msg.sender, requestId);
     }
 
     /**
@@ -224,23 +224,23 @@ contract FundVault is
 
     /**
      * Handler for Chainlink requests. Always contains the latest NAV data.
-     * Processes deposits and withdraws, or updates epoch data
+     * Processes deposits and redemptions, or updates epoch data
      */
-    function fulfill(bytes32 requestId, uint256 latestNAV) external recordChainlinkFulfillment(requestId) {
-        _latestOffchainNAV = latestNAV;
+    function fulfill(bytes32 requestId, uint256 latestOffchainNAV) external recordChainlinkFulfillment(requestId) {
+        _latestOffchainNAV = latestOffchainNAV;
 
         (address investor, uint256 amount, Action action) = super.getRequestData(requestId);
 
         if (action == Action.DEPOSIT) {
             _processDeposit(investor, amount, requestId);
-        } else if (action == Action.WITHDRAW) {
-            _processWithdraw(investor, amount, requestId);
-        } else if (action == Action.WITHDRAW_QUEUE) {
-            _processWithdrawalQueue(requestId);
+        } else if (action == Action.REDEEM) {
+            _processRedemption(investor, amount, requestId);
+        } else if (action == Action.REDEMPTION_QUEUE) {
+            _processRedemptionQueue(requestId);
         } else if (action == Action.ADVANCE_EPOCH) {
             _advanceEpoch(requestId);
         }
-        emit Fulfill(investor, requestId, latestNAV, amount, uint8(action));
+        emit Fulfill(investor, requestId, latestOffchainNAV, amount, uint8(action));
     }
 
     ////////////////////////////////////////////////////////////
@@ -273,13 +273,13 @@ contract FundVault is
     }
 
     /**
-     * Redeem from the fund.
-     * @dev Handled in {_processWithdraw}
+     * Redeem exact shares
+     * @dev Handled in {_processRedemption}
      * @param shares Amount of shares to redeem
      * @param receiver Must be msg.sender
      * @param owner Must be msg.sender
      */
-    function withdraw(uint256 shares, address receiver, address owner)
+    function redeem(uint256 shares, address receiver, address owner)
         public
         override
         onlyCaller(receiver)
@@ -292,10 +292,10 @@ contract FundVault is
         _kycManager.onlyKyc(receiver);
         _kycManager.onlyNotBanned(receiver);
 
-        _validateWithdraw(receiver, shares);
-        bytes32 requestId = super._requestTotalOffchainNAV(receiver, shares, Action.WITHDRAW, decimals());
+        _validateRedemption(receiver, shares);
+        bytes32 requestId = super._requestTotalOffchainNAV(receiver, shares, Action.REDEEM, decimals());
 
-        emit RequestWithdraw(receiver, shares, requestId);
+        emit RequestRedemption(receiver, shares, requestId);
         return 0;
     }
 
@@ -307,9 +307,10 @@ contract FundVault is
     }
 
     /**
-     * @notice Cannot be directly redeemed.
+     * @notice Asset balance may change between requesting and fulfilling, so using {withdraw} may result in
+     * leftover assets. Use {redeem} instead.
      */
-    function redeem(uint256, address, address) public pure override returns (uint256) {
+    function withdraw(uint256, address, address) public pure override returns (uint256) {
         revert();
     }
 
@@ -317,17 +318,17 @@ contract FundVault is
     // Public getters
     ////////////////////////////////////////////////////////////
 
-    function getWithdrawalQueueInfo(uint256 index) external view returns (address investor, uint256 shares) {
-        if (_withdrawalQueue.empty() || index > _withdrawalQueue.length() - 1) {
+    function getRedemptionQueueInfo(uint256 index) external view returns (address investor, uint256 shares) {
+        if (_redemptionQueue.empty() || index > _redemptionQueue.length() - 1) {
             return (address(0), 0);
         }
 
-        bytes memory data = bytes(_withdrawalQueue.at(index));
+        bytes memory data = bytes(_redemptionQueue.at(index));
         (investor, shares) = abi.decode(data, (address, uint256));
     }
 
-    function getWithdrawalQueueLength() external view returns (uint256) {
-        return _withdrawalQueue.length();
+    function getRedemptionQueueLength() external view returns (uint256) {
+        return _redemptionQueue.length();
     }
 
     /**
@@ -557,7 +558,7 @@ contract FundVault is
     /**
      * Ensures withdraw amount is within limits
      */
-    function _validateWithdraw(address sender, uint256 share) internal view virtual {
+    function _validateRedemption(address sender, uint256 share) internal view virtual {
         if (share > balanceOf(sender)) {
             revert InsufficientBalance(balanceOf(sender), share);
         }
@@ -590,7 +591,7 @@ contract FundVault is
      * Burns shares and transfers assets to investor.
      * NOTE: If insufficient asset liquidity, then queue for later
      */
-    function _processWithdraw(address investor, uint256 requestedShares, bytes32 requestId) internal {
+    function _processRedemption(address investor, uint256 requestedShares, bytes32 requestId) internal {
         if (requestedShares > balanceOf(investor)) {
             revert InsufficientBalance(balanceOf(investor), requestedShares);
         }
@@ -606,6 +607,7 @@ contract FundVault is
             actualShares = previewWithdraw(actualAssets);
         }
 
+        // Burn shares and transfer assets
         if (actualAssets > 0) {
             super._withdraw(investor, investor, investor, actualAssets, actualShares);
         }
@@ -613,24 +615,24 @@ contract FundVault is
         // Queue remaining shares for later
         if (requestedShares > actualShares) {
             uint256 remainingShares = requestedShares - actualShares;
-            _withdrawalQueue.pushBack(abi.encode(investor, remainingShares, requestId));
+            _redemptionQueue.pushBack(abi.encode(investor, remainingShares, requestId));
             super._transfer(investor, address(this), remainingShares);
-            emit UpdateQueueWithdrawal(investor, remainingShares, requestId);
+            emit AddToRedemptionQueue(investor, remainingShares, requestId);
         }
 
         _withdrawAmount[investor][_epoch] += requestedAssets;
-        emit ProcessWithdraw(
+        emit ProcessRedemption(
             investor, requestedAssets, requestedShares, requestId, availableAssets, actualAssets, actualShares
         );
     }
 
     /**
-     * Processes queued withdraws until no assets are remaining.
+     * Processes queued redemptions until no assets are remaining.
      * @dev May have remainders
      */
-    function _processWithdrawalQueue(bytes32 requestId) internal {
-        for (; !_withdrawalQueue.empty();) {
-            bytes memory data = _withdrawalQueue.front();
+    function _processRedemptionQueue(bytes32 requestId) internal {
+        for (; !_redemptionQueue.empty();) {
+            bytes memory data = _redemptionQueue.front();
             (address investor, uint256 shares, bytes32 prevId) = abi.decode(data, (address, uint256, bytes32));
 
             uint256 assets = previewRedeem(shares);
@@ -640,10 +642,10 @@ contract FundVault is
                 return;
             }
 
-            _withdrawalQueue.popFront();
+            _redemptionQueue.popFront();
             super._withdraw(address(this), investor, address(this), assets, shares);
 
-            emit ProcessWithdrawalQueue(investor, assets, shares, requestId, prevId);
+            emit ProcessRedemptionQueue(investor, assets, shares, requestId, prevId);
         }
     }
 
@@ -658,12 +660,12 @@ contract FundVault is
         _onchainFee += _getServiceFee(vaultNetAssets(), onchainFeeRate);
         _offchainFee += _getServiceFee(_latestOffchainNAV, offchainFeeRate);
 
-        emit AdvanceEpoch(_onchainFee, _offchainFee, _epoch, requestId);
+        emit ProcessAdvanceEpoch(_onchainFee, _offchainFee, _epoch, requestId);
     }
 
     function _setMinTxFee(uint256 newValue) internal {
         _minTxFee = newValue;
-        emit UpdateMinTxFee(newValue);
+        emit SetMinTxFee(newValue);
     }
 
     function _getAssetBalance(address addr) internal view returns (uint256) {
