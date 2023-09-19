@@ -36,6 +36,31 @@ contract VaultTestBasic is FundVaultFactory {
         fundVault.deposit(100_000e6, charlie);
     }
 
+    function test_Deposit_RevertWhenPaused() public {
+        vm.prank(operator);
+        fundVault.pause();
+        vm.expectRevert("Pausable: paused");
+        vm.prank(alice);
+        fundVault.deposit(100_000e6, alice);
+
+        vm.prank(operator);
+        fundVault.unpause();
+        alice_deposit(100_000e6);
+        assert(true);
+    }
+
+    function test_Deposit_RevertWhenNotEnoughBalance() public {
+        vm.expectRevert(abi.encodeWithSelector(InsufficientBalance.selector, 100_000e6, 200_000e6));
+        vm.prank(alice);
+        fundVault.deposit(200_000e6, alice);
+    }
+
+    function test_Deposit_RevertWhenNotEnoughAllowance() public {
+        vm.expectRevert(abi.encodeWithSelector(InsufficientAllowance.selector, 0, 100_000e6));
+        vm.prank(alice);
+        fundVault.deposit(100_000e6, alice);
+    }
+
     function test_Deposit_RevertWhenLessThanMinimum() public {
         vm.startPrank(alice);
         vm.expectRevert(abi.encodeWithSelector(MinimumDepositRequired.selector, 10_000e6));
@@ -44,6 +69,19 @@ contract VaultTestBasic is FundVaultFactory {
         vm.expectRevert(abi.encodeWithSelector(MinimumInitialDepositRequired.selector, 100_000e6));
         fundVault.deposit(10_000e6, alice);
         vm.stopPrank();
+    }
+
+    function test_Mint_Reverts() public {
+        vm.expectRevert();
+        vm.prank(alice);
+        fundVault.mint(100_000e6, alice);
+    }
+
+    function test_Withdraw_Reverts() public {
+        alice_deposit(100_000e6);
+        vm.expectRevert();
+        vm.prank(alice);
+        fundVault.withdraw(1, alice, alice);
     }
 
     function test_Withdraw_RevertWhenNotOwner() public {
@@ -69,6 +107,13 @@ contract VaultTestBasic is FundVaultFactory {
         vm.expectRevert(abi.encodeWithSelector(MinimumWithdrawRequired.selector, 10_000e6));
         fundVault.redeem(1, alice, alice);
     }
+
+    function test_TransferToTreasury_RevertWhenMoreThanAvailable() public {
+        alice_deposit(100_000e6);
+        vm.expectRevert(abi.encodeWithSelector(InsufficientBalance.selector, 99_950e6, 150_000e6));
+        vm.prank(operator);
+        fundVault.transferToTreasury(address(usdc), 150_000e6);
+    }
 }
 
 contract VaultTestTransfer is FundVaultFactory {
@@ -92,6 +137,60 @@ contract VaultTestTransfer is FundVaultFactory {
         emit Transfer(alice, bob, 1);
         vm.prank(alice);
         fundVault.transfer(bob, 1);
+
+        // sender kyc revoked
+        address[] memory _alice = new address[](1);
+        _alice[0] = alice;
+        kycManager.bulkRevokeKyc(_alice);
+
+        vm.expectRevert(bytes(DISALLOWED_OR_STOP_MESSAGE));
+        vm.prank(alice);
+        fundVault.transfer(bob, 1);
+
+        // sender banned
+        kycManager.bulkBan(_alice);
+
+        vm.expectRevert(bytes(REVOKED_OR_BANNED_MESSAGE));
+        vm.prank(alice);
+        fundVault.transfer(bob, 1);
+    }
+}
+
+contract VaultTestTransferNotStrict is FundVaultFactory {
+    function setUp() public {
+        alice_deposit(100_000e6);
+        kycManager.setStrict(false);
+        usdc.mint(bob, 100_000e6);
+    }
+
+    function test_Transfers_NotStrict() public {
+        // receiver no kyc: ok
+        vm.expectEmit();
+        emit Transfer(alice, charlie, 1);
+        vm.prank(alice);
+        fundVault.transfer(charlie, 1);
+    }
+
+    function test_Transfers_USSender() public {
+        // bob is US
+        address[] memory _bob = new address[](1);
+        _bob[0] = bob;
+        IKycManager.KycType[] memory _us = new IKycManager.KycType[](1);
+        _us[0] = IKycManager.KycType.US_KYC;
+        kycManager.bulkGrantKyc(_bob, _us);
+
+        make_deposit(bob, 100_000e6);
+
+        // receiver kyc: ok
+        vm.expectEmit();
+        emit Transfer(bob, alice, 1);
+        vm.prank(bob);
+        fundVault.transfer(alice, 1);
+
+        // receiver no kyc
+        vm.expectRevert(bytes(DISALLOWED_OR_STOP_MESSAGE));
+        vm.prank(bob);
+        fundVault.transfer(charlie, 1);
     }
 }
 
@@ -202,6 +301,9 @@ contract VaultTestBalances is FundVaultFactory {
         (, uint256 withdrawAmt,) = fundVault.getUserEpochInfo(alice, 1);
         assertEq(withdrawAmt, 10_000e6);
         assertEq(fundVault.getRedemptionQueueLength(), 1);
+        (address q0, uint256 q1) = fundVault.getRedemptionQueueInfo(0);
+        assertEq(q0, alice);
+        assertEq(q1, wantShares - actualShares);
 
         // Attempt to process queue: no change in assets
         nextRequestId();

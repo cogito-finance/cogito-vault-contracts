@@ -562,9 +562,6 @@ contract FundVault is
         if (share > balanceOf(sender)) {
             revert InsufficientBalance(balanceOf(sender), share);
         }
-        if (share == 0) {
-            revert InvalidAmount(share);
-        }
 
         (uint256 minWithdraw, uint256 maxWithdraw) = _baseVault.getMinMaxWithdraw();
         uint256 assets = previewRedeem(share);

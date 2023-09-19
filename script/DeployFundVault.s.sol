@@ -19,12 +19,14 @@ contract DeployFundVault is Script {
     function run() external {
         bool shouldDeployUSDC = vm.envOr("DEPLOY_USDC", false);
         bool shouldDeployBaseVault = vm.envOr("DEPLOY_BASE_VAULT", false);
+        bool shouldDeployKycManager = vm.envOr("DEPLOY_KYC_MANAGER", false);
 
         string memory network = vm.envOr("NETWORK", string("localhost"));
         string memory json = vm.readFile(string.concat("./deploy/", network, ".json"));
 
         address USDC_ADDRESS = vm.parseJsonAddress(json, ".USDC");
         address BASE_VAULT_ADDRESS = vm.parseJsonAddress(json, ".BaseVault");
+        address KYC_MANAGER_ADDRESS = vm.parseJsonAddress(json, ".KycManager");
 
         address CHAINLINK_TOKEN_ADDRESS = network.equal("sepolia")
             ? vm.envAddress("CHAINLINK_TOKEN_ADDRESS_SEPOLIA")
@@ -54,7 +56,7 @@ contract DeployFundVault is Script {
             baseVault = BaseVault(BASE_VAULT_ADDRESS);
         }
 
-        kycManager = new KycManager(true);
+        kycManager = shouldDeployKycManager ? new KycManager(true) : KycManager(KYC_MANAGER_ADDRESS);
 
         IChainlinkAccessor.ChainlinkParameters memory chainlinkParams = IChainlinkAccessor.ChainlinkParameters({
             jobId: vm.envBytes32("CHAINLINK_JOBID"),

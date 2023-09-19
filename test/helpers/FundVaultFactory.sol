@@ -108,11 +108,15 @@ contract FundVaultFactory is Test, IFundVaultEvents, ITestEvents {
     }
 
     function alice_deposit(uint256 amount) public {
+        make_deposit(alice, amount);
+    }
+
+    function make_deposit(address user, uint256 amount) public {
         // Deposit.1
         nextRequestId();
-        vm.startPrank(alice);
+        vm.startPrank(user);
         usdc.approve(address(fundVault), amount);
-        fundVault.deposit(amount, alice);
+        fundVault.deposit(amount, user);
         vm.stopPrank();
 
         // Deposit.2
