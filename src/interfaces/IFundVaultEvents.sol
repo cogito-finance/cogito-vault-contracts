@@ -10,7 +10,7 @@ interface IFundVaultEvents {
 
     event ClaimOnchainServiceFee(address caller, address receiver, uint256 amount);
     event ClaimOffchainServiceFee(address caller, address receiver, uint256 amount);
-    event TransferToTreasury(address treasury, uint256 assets);
+    event TransferToTreasury(address receiver, address asset, uint256 amount);
 
     event RequestAdvanceEpoch(address caller, bytes32 requestId);
     event ProcessAdvanceEpoch(

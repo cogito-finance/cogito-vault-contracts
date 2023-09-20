@@ -174,7 +174,7 @@ contract FundVault is
         }
 
         SafeERC20Upgradeable.safeTransfer(IERC20Upgradeable(underlying), _treasury, amount);
-        emit TransferToTreasury(_treasury, amount);
+        emit TransferToTreasury(_treasury, asset(), amount);
     }
 
     /**

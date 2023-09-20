@@ -138,6 +138,11 @@ contract VaultTestTransfer is FundVaultFactory {
         vm.prank(alice);
         fundVault.transfer(bob, 1);
 
+        // no sending to 0
+        vm.expectRevert("ERC20: transfer to the zero address");
+        vm.prank(alice);
+        fundVault.transfer(address(0), 1);
+
         // sender kyc revoked
         address[] memory _alice = new address[](1);
         _alice[0] = alice;
@@ -218,6 +223,74 @@ contract VaultTestDeposit is FundVaultFactory {
     }
 }
 
+contract VaultTestLimits is FundVaultFactory {
+    function test_Deposit_Limits() public {
+        baseVault.setMaxDeposit(150_000e6);
+        baseVault.setMaxWithdraw(20_000e6);
+        baseVault.setTransactionFee(0);
+        fundVault.setMinTxFee(0);
+        usdc.mint(alice, 1_000_000e6);
+
+        // exceeds max deposit in 1 try
+        vm.startPrank(alice);
+        usdc.approve(address(fundVault), 1_000_000e6);
+        vm.expectRevert(abi.encodeWithSelector(MaximumDepositExceeded.selector, 150_000e6));
+        fundVault.deposit(200_000e6, alice);
+        vm.stopPrank();
+
+        // deposit 100k
+        nextRequestId();
+        vm.startPrank(alice);
+        fundVault.deposit(100_000e6, alice);
+        vm.stopPrank();
+        vm.prank(oracle);
+        fundVault.fulfill(getRequestId(), 0);
+
+        // exceeds max in 2 tries
+        vm.expectRevert(abi.encodeWithSelector(MaximumDepositExceeded.selector, 150_000e6));
+        vm.prank(alice);
+        fundVault.deposit(60_000e6, alice);
+
+        // single withdraw > max but net ok
+        nextRequestId();
+        vm.expectEmit();
+        emit RequestRedemption(alice, 25_000e6, getRequestId());
+        vm.prank(alice);
+        fundVault.redeem(25_000e6, alice, alice);
+        vm.prank(oracle);
+        fundVault.fulfill(getRequestId(), 0);
+
+        // advance epoch so we can withdraw
+        nextRequestId();
+        vm.prank(operator);
+        fundVault.requestAdvanceEpoch();
+        vm.prank(oracle);
+        fundVault.fulfill(getRequestId(), 0);
+
+        // exceeds max withdraw in 1 try
+        vm.expectRevert(abi.encodeWithSelector(MaximumWithdrawExceeded.selector, 20_000e6));
+        vm.prank(alice);
+        fundVault.redeem(25_000e6, alice, alice);
+
+        // withdraw 11k
+        nextRequestId();
+        vm.prank(alice);
+        fundVault.redeem(11_000e6, alice, alice);
+        vm.prank(oracle);
+        fundVault.fulfill(getRequestId(), 0);
+
+        // net withdraw: exceeds max deposit
+        vm.expectRevert(abi.encodeWithSelector(MaximumDepositExceeded.selector, 150_000e6));
+        vm.prank(alice);
+        fundVault.deposit(161_000e6, alice);
+
+        // net withdraw: exceeds max withdraw
+        vm.expectRevert(abi.encodeWithSelector(MaximumWithdrawExceeded.selector, 20_000e6));
+        vm.prank(alice);
+        fundVault.redeem(11_000e6, alice, alice);
+    }
+}
+
 contract VaultTestBalances is FundVaultFactory {
     function setUp() public {
         alice_deposit(100_000e6);
@@ -234,6 +307,9 @@ contract VaultTestBalances is FundVaultFactory {
         assertEq(fundVault.excessReserves(), 94_952_500_000);
         assertEq(usdc.balanceOf(feeReceiver), 50_000_000);
 
+        // Transfer to treasury
+        vm.expectEmit();
+        emit TransferToTreasury(fundVault._treasury(), address(usdc), 94_952_500_000);
         vm.prank(operator);
         fundVault.transferExcessReservesToTreasury();
 
@@ -336,5 +412,45 @@ contract VaultTestBalances is FundVaultFactory {
         assertEq(fundVault.balanceOf(alice), shareBalance - wantShares);
         assertEq(fundVault.totalSupply(), shareBalance - wantShares);
         assertEq(fundVault.previewWithdraw(fundVault.combinedNetAssets()), fundVault.totalSupply());
+    }
+}
+
+contract VaultTestBetweenChainlink is FundVaultFactory {
+    function test_Deposit_TransferBeforeFulfill() public {
+        assertEq(usdc.balanceOf(alice), 100_000e6);
+        nextRequestId();
+        bytes32 requestId = getRequestId();
+        vm.startPrank(alice);
+        usdc.approve(address(fundVault), 100_000e6);
+        fundVault.deposit(100_000e6, alice);
+        // transfer out: not enough to deposit
+        usdc.transfer(bob, 1);
+        vm.stopPrank();
+
+        assertLt(usdc.balanceOf(alice), 100_000e6);
+
+        vm.expectRevert("ERC20: transfer amount exceeds balance");
+        vm.prank(oracle);
+        fundVault.fulfill(requestId, 0);
+
+        assertEq(fundVault.balanceOf(alice), 0);
+    }
+
+    function test_Withdraw_TransferBeforeFulfill() public {
+        alice_deposit(100_000e6);
+
+        uint256 balance = fundVault.balanceOf(alice);
+
+        nextRequestId();
+        vm.startPrank(alice);
+        fundVault.redeem(balance - 10_000e6, alice, alice);
+        // transfer out: not enough to redeem
+        fundVault.transfer(bob, 50_000e6);
+        vm.stopPrank();
+
+        vm.expectRevert(abi.encodeWithSelector(InsufficientBalance.selector, balance - 50_000e6, balance - 10_000e6));
+        vm.prank(oracle);
+        fundVault.fulfill(getRequestId(), 0);
+        assertEq(fundVault.balanceOf(alice), balance - 50_000e6);
     }
 }
