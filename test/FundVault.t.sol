@@ -199,6 +199,49 @@ contract VaultTestTransferNotStrict is FundVaultFactory {
     }
 }
 
+contract VaultTestInitialDeposit is FundVaultFactory {
+    function setUp() public {
+        alice_deposit(100_000e6);
+    }
+
+    function test_InitialDeposit_Receive() public {
+        vm.prank(alice);
+        fundVault.transfer(bob, 1);
+        assertEq(fundVault._initialDeposit(bob), true);
+
+        vm.prank(bob);
+        fundVault.transfer(alice, 1);
+        assertEq(fundVault._initialDeposit(bob), true);
+        assertEq(fundVault.balanceOf(bob), 0);
+
+        usdc.mint(bob, 10_000e6);
+
+        make_deposit(bob, 10_000e6);
+        assertGt(fundVault.balanceOf(bob), 0);
+    }
+
+    function test_InitialDeposit_Grant() public {
+        address a1 = address(0xdeadbeef91);
+        address a2 = address(0xdeadbeef92);
+        address[] memory _investors = new address[](2);
+        _investors[0] = a1;
+        _investors[1] = a2;
+        IKycManager.KycType[] memory _kycTypes = new IKycManager.KycType[](2);
+        _kycTypes[0] = IKycManager.KycType.GENERAL_KYC;
+        _kycTypes[1] = IKycManager.KycType.GENERAL_KYC;
+        kycManager.bulkGrantKyc(_investors, _kycTypes);
+
+        fundVault.bulkSetInitialDeposit(_investors);
+
+        usdc.mint(a1, 10_000e6);
+        usdc.mint(a2, 10_000e6);
+        make_deposit(a1, 10_000e6);
+        make_deposit(a2, 10_000e6);
+        assertGt(fundVault.balanceOf(a1), 0);
+        assertGt(fundVault.balanceOf(a2), 0);
+    }
+}
+
 contract VaultTestDeposit is FundVaultFactory {
     function test_Deposit_Events() public {
         uint256 amount = 100_000e6;

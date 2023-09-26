@@ -69,27 +69,33 @@ abstract contract ChainlinkAccessor is IChainlinkAccessor, ChainlinkClient, Admi
     }
 
     function setChainlinkOracleAddress(address newAddress) external onlyAdmin {
-        _setChainlinkOracleAddress(newAddress);
+        super.setChainlinkOracle(newAddress);
+        emit SetChainlinkOracleAddress(newAddress);
     }
 
     function setChainlinkFee(uint256 fee) external onlyAdmin {
-        _setChainlinkFee(fee);
+        _params.fee = fee;
+        emit SetChainlinkFee(fee);
     }
 
     function setChainlinkJobId(bytes32 jobId) external onlyAdmin {
-        _setChainlinkJobId(jobId);
+        _params.jobId = jobId;
+        emit SetChainlinkJobId(jobId);
     }
 
     function setChainlinkURLData(string memory url) external onlyAdmin {
-        _setChainlinkURLData(url);
+        _params.urlData = url;
+        emit SetChainlinkURLData(url);
     }
 
     function setPathToOffchainAssets(string memory path) external onlyAdmin {
-        _setPathToOffchainAssets(path);
+        _params.pathToOffchainAssets = path;
+        emit SetPathToOffchainAssets(path);
     }
 
     function setPathToTotalOffchainAssetAtLastClose(string memory path) external onlyAdmin {
-        _setPathToTotalOffchainAssetAtLastClose(path);
+        _params.pathToTotalOffchainAssetAtLastClose = path;
+        emit SetPathToTotalOffchainAssetAtLastClose(path);
     }
 
     function getChainLinkParameters() external view returns (ChainlinkParameters memory params) {
@@ -100,39 +106,5 @@ abstract contract ChainlinkAccessor is IChainlinkAccessor, ChainlinkClient, Admi
         investor = _requestIdToRequestData[requestId].investor;
         amount = _requestIdToRequestData[requestId].amount;
         action = _requestIdToRequestData[requestId].action;
-    }
-
-    ////////////////////////////////////////////////////////////
-    // Internal implementation functions
-    ////////////////////////////////////////////////////////////
-
-    function _setChainlinkOracleAddress(address newAddress) internal {
-        super.setChainlinkOracle(newAddress);
-        emit SetChainlinkOracleAddress(newAddress);
-    }
-
-    function _setChainlinkFee(uint256 fee) internal {
-        _params.fee = fee;
-        emit SetChainlinkFee(fee);
-    }
-
-    function _setChainlinkJobId(bytes32 jobId) internal {
-        _params.jobId = jobId;
-        emit SetChainlinkJobId(jobId);
-    }
-
-    function _setChainlinkURLData(string memory url) internal {
-        _params.urlData = url;
-        emit SetChainlinkURLData(url);
-    }
-
-    function _setPathToOffchainAssets(string memory path) internal {
-        _params.pathToOffchainAssets = path;
-        emit SetPathToOffchainAssets(path);
-    }
-
-    function _setPathToTotalOffchainAssetAtLastClose(string memory path) internal {
-        _params.pathToTotalOffchainAssetAtLastClose = path;
-        emit SetPathToTotalOffchainAssetAtLastClose(path);
     }
 }

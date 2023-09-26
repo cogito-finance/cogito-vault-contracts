@@ -74,7 +74,7 @@ contract FundVault is
         ChainlinkParameters memory chainlinkParams
     ) external initializer {
         __ERC4626_init(asset);
-        __ERC20_init("Cogito SFUND", "SFUND");
+        __ERC20_init("Cogito TFUND", "TFUND");
 
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(OPERATOR_ROLE, operator);
@@ -84,8 +84,9 @@ contract FundVault is
         _baseVault = baseVault;
         _kycManager = kycManager;
 
+        _minTxFee = 25 * 10 ** decimals(); // 25USDC
+
         super.init(chainlinkParams, chainlinkToken, chainlinkOracle);
-        _setMinTxFee(25 * 10 ** decimals()); // 25USDC
     }
 
     ////////////////////////////////////////////////////////////
@@ -181,7 +182,8 @@ contract FundVault is
      * Sets the minimum transaction fee
      */
     function setMinTxFee(uint256 newValue) external onlyAdminOrOperator {
-        _setMinTxFee(newValue);
+        _minTxFee = newValue;
+        emit SetMinTxFee(newValue);
     }
 
     /**
@@ -216,6 +218,15 @@ contract FundVault is
         _offchainFee -= amount;
         SafeERC20Upgradeable.safeTransfer(IERC20Upgradeable(asset()), _feeReceiver, amount);
         emit ClaimOffchainServiceFee(msg.sender, _feeReceiver, amount);
+    }
+
+    /**
+     * Set the users as already deposited.
+     */
+    function bulkSetInitialDeposit(address[] calldata _investors) external onlyAdminOrOperator {
+        for (uint256 i = 0; i < _investors.length; i++) {
+            _initialDeposit[_investors[i]] = true;
+        }
     }
 
     ////////////////////////////////////////////////////////////
@@ -338,26 +349,6 @@ contract FundVault is
         return _minTxFee.max((assets * _baseVault.getTransactionFee()) / BPS_UNIT);
     }
 
-    // TODO: What are these used for?
-    function previewDepositCustomize(uint256 assets, uint256 totalOffchainAsset) public view returns (uint256) {
-        // based on _convertToShares
-        uint256 supply = totalSupply();
-        MathUpgradeable.Rounding rounding = MathUpgradeable.Rounding.Down;
-
-        return (assets == 0 || supply == 0)
-            ? _initialConvertToShares(assets, rounding)
-            : assets.mulDiv(supply, totalOffchainAsset + vaultNetAssets(), rounding);
-    }
-
-    function previewRedeemCustomize(uint256 shares, uint256 totalOffchainAsset) public view returns (uint256) {
-        // based on _convertToAssets
-        uint256 supply = totalSupply();
-        MathUpgradeable.Rounding rounding = MathUpgradeable.Rounding.Down;
-        return (supply == 0)
-            ? _initialConvertToAssets(shares, rounding)
-            : shares.mulDiv(totalOffchainAsset + vaultNetAssets(), supply, rounding);
-    }
-
     /**
      * Returns the requested deposit/withdraw amount for the given user for the current epoch, and the net amount
      */
@@ -396,12 +387,8 @@ contract FundVault is
     function excessReserves() public view returns (uint256 amount) {
         uint256 targetReserves = _baseVault.getTargetReservesLevel() * combinedNetAssets() / 100;
         uint256 currentReserves = vaultNetAssets();
-        return currentReserves - targetReserves.max(0);
+        return (currentReserves - targetReserves).max(0);
     }
-
-    ////////////////////////////////////////////////////////////
-    // ERC-1404 Overrides
-    ////////////////////////////////////////////////////////////
 
     /**
      * Applies KYC checks on transfers. Sender/receiver cannot be banned.
@@ -418,6 +405,19 @@ contract FundVault is
         uint8 restrictionCode = detectTransferRestriction(from, to, 0);
         require(restrictionCode == SUCCESS_CODE, messageForTransferRestriction(restrictionCode));
     }
+
+    /**
+     * After any user receives a token, mark as having deposited.
+     */
+    function _afterTokenTransfer(address, address to, uint256) internal override {
+        if (to != address(0) && !_initialDeposit[to]) {
+            _initialDeposit[to] = true;
+        }
+    }
+
+    ////////////////////////////////////////////////////////////
+    // ERC-1404 Overrides
+    ////////////////////////////////////////////////////////////
 
     function detectTransferRestriction(address from, address to, uint256 /*value*/ )
         public
@@ -448,23 +448,7 @@ contract FundVault is
         returns (uint256 assets)
     {
         uint256 supply = totalSupply();
-        return (supply == 0)
-            ? _initialConvertToAssets(shares, rounding)
-            : shares.mulDiv(combinedNetAssets(), supply, rounding);
-    }
-
-    /**
-     * @dev Internal conversion function (from shares to assets) to apply when the vault is empty.
-     *
-     * NOTE: Make sure to keep this function consistent with {_initialConvertToShares} when overriding it.
-     */
-    function _initialConvertToAssets(uint256 shares, MathUpgradeable.Rounding /*rounding*/ )
-        internal
-        view
-        virtual
-        returns (uint256 assets)
-    {
-        return shares;
+        return (supply == 0) ? shares : shares.mulDiv(combinedNetAssets(), supply, rounding);
     }
 
     function _convertToShares(uint256 assets, MathUpgradeable.Rounding rounding)
@@ -474,24 +458,7 @@ contract FundVault is
         returns (uint256 shares)
     {
         uint256 supply = totalSupply();
-
-        return (assets == 0 || supply == 0)
-            ? _initialConvertToShares(assets, rounding)
-            : assets.mulDiv(supply, combinedNetAssets(), rounding);
-    }
-
-    /**
-     * @dev Internal conversion function (from assets to shares) to apply when the vault is empty.
-     *
-     * NOTE: Make sure to keep this function consistent with {_initialConvertToAssets} when overriding it.
-     */
-    function _initialConvertToShares(uint256 assets, MathUpgradeable.Rounding /*rounding*/ )
-        internal
-        view
-        virtual
-        returns (uint256 shares)
-    {
-        return assets;
+        return (assets == 0 || supply == 0) ? assets : assets.mulDiv(supply, combinedNetAssets(), rounding);
     }
 
     ////////////////////////////////////////////////////////////
@@ -547,9 +514,6 @@ contract FundVault is
         super._deposit(investor, investor, actualAsset, shares);
 
         SafeERC20Upgradeable.safeTransferFrom(IERC20Upgradeable(asset()), investor, _feeReceiver, txFee);
-        if (!_initialDeposit[investor]) {
-            _initialDeposit[investor] = true;
-        }
 
         _depositAmount[investor][_epoch] += actualAsset;
         emit ProcessDeposit(investor, assets, shares, requestId, txFee, _feeReceiver);
@@ -658,11 +622,6 @@ contract FundVault is
         _offchainFee += _getServiceFee(_latestOffchainNAV, offchainFeeRate);
 
         emit ProcessAdvanceEpoch(_onchainFee, _offchainFee, _epoch, requestId);
-    }
-
-    function _setMinTxFee(uint256 newValue) internal {
-        _minTxFee = newValue;
-        emit SetMinTxFee(newValue);
     }
 
     function _getAssetBalance(address addr) internal view returns (uint256) {
