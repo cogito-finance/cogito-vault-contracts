@@ -1,8 +1,8 @@
 pragma solidity ^0.8.19;
 
-import "openzeppelin-contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
+import "openzeppelin-contracts/token/ERC20/IERC20.sol";
 
-interface IERC1404 is IERC20Upgradeable {
+interface IERC1404 is IERC20 {
     /// @notice Detects if a transfer will be reverted and if so returns an appropriate reference code
     /// @param from Sending address
     /// @param to Receiving address

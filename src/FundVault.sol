@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-import "openzeppelin-contracts-upgradeable/security/PausableUpgradeable.sol";
-import "openzeppelin-contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
-import "openzeppelin-contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
+import "openzeppelin-contracts/security/Pausable.sol";
+import "openzeppelin-contracts/security/ReentrancyGuard.sol";
+import "openzeppelin-contracts/token/ERC20/extensions/ERC4626.sol";
 
 import "./ChainlinkAccessor.sol";
 import "./interfaces/IBaseVault.sol";
@@ -26,16 +26,8 @@ import "./utils/ERC1404.sol";
  * - Call {requestRedemptionQueue} after assets have been deposited back into the vault to process queued redemptions
  * - Call {transferToTreasury} after deposits to move offchain
  */
-contract FundVault is
-    ERC4626Upgradeable,
-    ReentrancyGuardUpgradeable,
-    PausableUpgradeable,
-    ChainlinkAccessor,
-    AdminOperatorRoles,
-    ERC1404,
-    IFundVault
-{
-    using MathUpgradeable for uint256;
+contract FundVault is ERC4626, ReentrancyGuard, Pausable, ChainlinkAccessor, AdminOperatorRoles, ERC1404, IFundVault {
+    using Math for uint256;
     using BytesQueue for BytesQueue.BytesDeque;
 
     BytesQueue.BytesDeque _redemptionQueue;
@@ -62,8 +54,8 @@ contract FundVault is
     // Init
     ////////////////////////////////////////////////////////////
 
-    function initialize(
-        IERC20Upgradeable asset,
+    constructor(
+        IERC20 asset,
         address operator,
         address feeReceiver,
         address treasury,
@@ -72,10 +64,7 @@ contract FundVault is
         address chainlinkToken,
         address chainlinkOracle,
         ChainlinkParameters memory chainlinkParams
-    ) external initializer {
-        __ERC4626_init(asset);
-        __ERC20_init("Cogito TFUND", "TFUND");
-
+    ) ERC4626(asset) ERC20("Cogito TFUND", "TFUND") {
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(OPERATOR_ROLE, operator);
 
@@ -174,7 +163,7 @@ contract FundVault is
             revert InsufficientBalance(vaultNetAssets(), amount);
         }
 
-        SafeERC20Upgradeable.safeTransfer(IERC20Upgradeable(underlying), _treasury, amount);
+        SafeERC20.safeTransfer(IERC20(underlying), _treasury, amount);
         emit TransferToTreasury(_treasury, asset(), amount);
     }
 
@@ -199,7 +188,7 @@ contract FundVault is
         }
 
         _onchainFee -= amount;
-        SafeERC20Upgradeable.safeTransfer(IERC20Upgradeable(asset()), _feeReceiver, amount);
+        SafeERC20.safeTransfer(IERC20(asset()), _feeReceiver, amount);
         emit ClaimOnchainServiceFee(msg.sender, _feeReceiver, amount);
     }
 
@@ -216,7 +205,7 @@ contract FundVault is
         }
 
         _offchainFee -= amount;
-        SafeERC20Upgradeable.safeTransfer(IERC20Upgradeable(asset()), _feeReceiver, amount);
+        SafeERC20.safeTransfer(IERC20(asset()), _feeReceiver, amount);
         emit ClaimOffchainServiceFee(msg.sender, _feeReceiver, amount);
     }
 
@@ -441,22 +430,12 @@ contract FundVault is
     // ERC-4626 Overrides
     ////////////////////////////////////////////////////////////
 
-    function _convertToAssets(uint256 shares, MathUpgradeable.Rounding rounding)
-        internal
-        view
-        override
-        returns (uint256 assets)
-    {
+    function _convertToAssets(uint256 shares, Math.Rounding rounding) internal view override returns (uint256 assets) {
         uint256 supply = totalSupply();
         return (supply == 0) ? shares : shares.mulDiv(combinedNetAssets(), supply, rounding);
     }
 
-    function _convertToShares(uint256 assets, MathUpgradeable.Rounding rounding)
-        internal
-        view
-        override
-        returns (uint256 shares)
-    {
+    function _convertToShares(uint256 assets, Math.Rounding rounding) internal view override returns (uint256 shares) {
         uint256 supply = totalSupply();
         return (assets == 0 || supply == 0) ? assets : assets.mulDiv(supply, combinedNetAssets(), rounding);
     }
@@ -484,8 +463,8 @@ contract FundVault is
         if (!_initialDeposit[sender] && assets < initialDeposit) {
             revert MinimumInitialDepositRequired(initialDeposit);
         }
-        if (IERC20Upgradeable(asset()).allowance(sender, address(this)) < assets) {
-            revert InsufficientAllowance(IERC20Upgradeable(asset()).allowance(sender, address(this)), assets);
+        if (IERC20(asset()).allowance(sender, address(this)) < assets) {
+            revert InsufficientAllowance(IERC20(asset()).allowance(sender, address(this)), assets);
         }
 
         (uint256 depositAmt, uint256 withdrawAmt, uint256 delta) = getUserEpochInfo(sender, _epoch);
@@ -513,7 +492,7 @@ contract FundVault is
         uint256 shares = previewDeposit(actualAsset);
         super._deposit(investor, investor, actualAsset, shares);
 
-        SafeERC20Upgradeable.safeTransferFrom(IERC20Upgradeable(asset()), investor, _feeReceiver, txFee);
+        SafeERC20.safeTransferFrom(IERC20(asset()), investor, _feeReceiver, txFee);
 
         _depositAmount[investor][_epoch] += actualAsset;
         emit ProcessDeposit(investor, assets, shares, requestId, txFee, _feeReceiver);
@@ -625,22 +604,10 @@ contract FundVault is
     }
 
     function _getAssetBalance(address addr) internal view returns (uint256) {
-        return IERC20Upgradeable(asset()).balanceOf(addr);
+        return IERC20(asset()).balanceOf(addr);
     }
 
     function _getServiceFee(uint256 assets, uint256 rate) internal pure returns (uint256 fee) {
         return (assets * rate) / (365 * BPS_UNIT);
-    }
-
-    ////////////////////////////////////////////////////////////
-    // Needed since we inherit both Context and ContextUpgradeable
-    ////////////////////////////////////////////////////////////
-
-    function _msgSender() internal view virtual override(Context, ContextUpgradeable) returns (address) {
-        return msg.sender;
-    }
-
-    function _msgData() internal view virtual override(Context, ContextUpgradeable) returns (bytes calldata) {
-        return msg.data;
     }
 }

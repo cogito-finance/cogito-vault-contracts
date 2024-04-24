@@ -71,9 +71,8 @@ contract FundVaultFactory is Test, IFundVaultEvents, ITestEvents {
             pathToTotalOffchainAssetAtLastClose: vm.envString("CHAINLINK_PATH_TO_OFFCHAIN_ASSETS_AT_LAST_CLOSE")
         });
 
-        fundVault = new FundVault();
-        fundVault.initialize(
-            IERC20Upgradeable(address(usdc)),
+        fundVault = new FundVault(
+            IERC20(address(usdc)),
             operator,
             feeReceiver,
             treasury,
