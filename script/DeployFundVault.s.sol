@@ -15,18 +15,15 @@ contract DeployFundVault is Script {
     BaseVault public baseVault;
     KycManager public kycManager;
     FundVault public fundVault;
+    USDC public usdc;
 
     function run() external {
         bool shouldDeployUSDC = vm.envOr("DEPLOY_USDC", false);
-        bool shouldDeployBaseVault = vm.envOr("DEPLOY_BASE_VAULT", false);
-        bool shouldDeployKycManager = vm.envOr("DEPLOY_KYC_MANAGER", false);
+        bool shouldDeployBaseVault = vm.envOr("DEPLOY_BASE_VAULT", true);
+        bool shouldDeployKycManager = vm.envOr("DEPLOY_KYC_MANAGER", true);
 
         string memory network = vm.envOr("NETWORK", string("localhost"));
         string memory json = vm.readFile(string.concat("./deploy/", network, ".json"));
-
-        address USDC_ADDRESS = vm.parseJsonAddress(json, ".USDC");
-        address BASE_VAULT_ADDRESS = vm.parseJsonAddress(json, ".BaseVault");
-        address KYC_MANAGER_ADDRESS = vm.parseJsonAddress(json, ".KycManager");
 
         address CHAINLINK_TOKEN_ADDRESS = network.equal("sepolia")
             ? vm.envAddress("CHAINLINK_TOKEN_ADDRESS_SEPOLIA")
@@ -38,7 +35,11 @@ contract DeployFundVault is Script {
         address deployer = vm.envAddress("DEPLOYER");
         vm.startBroadcast(deployer);
 
-        USDC usdc = shouldDeployUSDC ? new USDC() : USDC(USDC_ADDRESS);
+        if (shouldDeployUSDC) {
+            usdc = new USDC();
+        } else {
+            usdc = USDC(vm.envAddress("USDC_ADDRESS"));
+        }
 
         if (shouldDeployBaseVault) {
             baseVault = new BaseVault(
@@ -53,10 +54,11 @@ contract DeployFundVault is Script {
                 vm.envUint("OFFCHAIN_SERVICE_FEE_RATE")
             );
         } else {
-            baseVault = BaseVault(BASE_VAULT_ADDRESS);
+            baseVault = BaseVault(vm.parseJsonAddress(json, ".BaseVault"));
         }
 
-        kycManager = shouldDeployKycManager ? new KycManager(true) : KycManager(KYC_MANAGER_ADDRESS);
+        kycManager =
+            shouldDeployKycManager ? new KycManager(true) : KycManager(vm.parseJsonAddress(json, ".KycManager"));
 
         IChainlinkAccessor.ChainlinkParameters memory chainlinkParams = IChainlinkAccessor.ChainlinkParameters({
             jobId: vm.envBytes32("CHAINLINK_JOBID"),

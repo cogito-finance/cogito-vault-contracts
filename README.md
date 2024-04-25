@@ -17,5 +17,28 @@ To build and test:
 
 ```sh
 forge build
-forge test -vv
+forge test -vv && forge coverage --report lcov
+```
+
+## Key Management
+
+There are two roles, the admin (deployer) and multiple operators. Private keys can be imported as follows:
+
+```sh
+cast wallet import -i operator
+cast wallet import -i deployer
+```
+
+## Deployment
+
+To deploy to sepolia:
+
+```sh
+NETWORK=sepolia DEPLOY_USDC=true forge script script/DeployFundVault.s.sol -f sepolia --account deployer --broadcast
+```
+
+To deploy to mainnet:
+
+```sh
+NETWORK=mainnet forge script script/DeployFundVault.s.sol -f mainnet --account deployer --broadcast
 ```
