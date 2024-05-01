@@ -42,3 +42,10 @@ To deploy to mainnet:
 ```sh
 NETWORK=mainnet forge script script/DeployFundVault.s.sol -f mainnet --account deployer --broadcast
 ```
+
+Verify on etherscan:
+
+```sh
+forge verify-contract --chain-id 1 --num-of-optimizations 200 --watch --constructor-args $(cast abi-encode "constructor(uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256)" 15 100000000000 10000000000 1000000000000000 0 1000000000000000 5 0 0) --compiler-version v0.8.19+commit.7dd6d404 0xdaFec86d96F8a97f34186f9988Ead7991CBc2dd4 src/BaseVault.sol:BaseVault
+forge verify-contract --chain-id 1 --num-of-optimizations 200 --watch --constructor-args $(cast abi-encode "constructor(bool)" true) --compiler-version v0.8.19+commit.7dd6d404 0x908f368431B2A9d2D26E2d9984b8c81e37E4FAEc src/KycManager.sol:KycManager
+```
