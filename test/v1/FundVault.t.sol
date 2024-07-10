@@ -5,14 +5,14 @@ import "openzeppelin-contracts/token/ERC20/presets/ERC20PresetMinterPauser.sol";
 import "chainlink/mocks/MockLinkToken.sol";
 import "forge-std/Test.sol";
 
-import "../src/BaseVault.sol";
-import "../src/KycManager.sol";
-import "../src/FundVault.sol";
-import "../src/interfaces/IFundVaultEvents.sol";
-import "../src/interfaces/Errors.sol";
-import "../src/utils/ERC1404.sol";
+import "../../src/KycManager.sol";
+import "../../src/interfaces/Errors.sol";
+import "../../src/utils/ERC1404.sol";
+import "../../src/v1/BaseVault.sol";
+import "../../src/v1/FundVault.sol";
+import "../../src/v1/interfaces/IFundVaultEvents.sol";
 import "./helpers/FundVaultFactory.sol";
-import "../src/mocks/USDC.sol";
+import "../../src/mocks/USDC.sol";
 
 contract VaultTestBasic is FundVaultFactory {
     function test_Decimals() public {

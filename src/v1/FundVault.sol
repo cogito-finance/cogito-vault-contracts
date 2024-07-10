@@ -8,10 +8,10 @@ import "openzeppelin-contracts/token/ERC20/extensions/ERC4626.sol";
 import "./ChainlinkAccessor.sol";
 import "./interfaces/IBaseVault.sol";
 import "./interfaces/IFundVault.sol";
-import "./interfaces/IKycManager.sol";
-import "./utils/AdminOperatorRoles.sol";
+import "../interfaces/IKycManager.sol";
+import "../utils/AdminOperatorRoles.sol";
 import "./utils/BytesQueue.sol";
-import "./utils/ERC1404.sol";
+import "../utils/ERC1404.sol";
 
 /**
  * Represents a fund vault with offchain NAV and onchain assets for liquidity.

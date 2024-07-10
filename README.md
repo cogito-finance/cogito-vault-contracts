@@ -17,7 +17,7 @@ To build and test:
 
 ```sh
 forge build
-forge test -vv && forge coverage --report lcov
+forge test && forge coverage --report lcov
 ```
 
 ## Key Management

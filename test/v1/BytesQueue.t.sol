@@ -2,7 +2,7 @@
 pragma solidity ^0.8.19;
 
 import "forge-std/Test.sol";
-import "../src/utils/BytesQueue.sol";
+import "../../src/v1/utils/BytesQueue.sol";
 
 contract BytesQueueTest is Test {
     using BytesQueue for BytesQueue.BytesDeque;

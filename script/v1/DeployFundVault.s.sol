@@ -4,10 +4,10 @@ pragma solidity ^0.8.19;
 import "openzeppelin-contracts/utils/Strings.sol";
 import "forge-std/Script.sol";
 
-import "../src/mocks/USDC.sol";
-import "../src/BaseVault.sol";
-import "../src/KycManager.sol";
-import "../src/FundVault.sol";
+import "../../src/mocks/USDC.sol";
+import "../../src/KycManager.sol";
+import "../../src/v1/BaseVault.sol";
+import "../../src/v1/FundVault.sol";
 
 contract DeployFundVault is Script {
     using Strings for string;

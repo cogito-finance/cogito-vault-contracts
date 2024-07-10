@@ -5,7 +5,7 @@ import "chainlink/ChainlinkClient.sol";
 
 import "./interfaces/IChainlinkAccessor.sol";
 import "./interfaces/IFundVault.sol";
-import "./utils/AdminRole.sol";
+import "../utils/AdminRole.sol";
 
 /**
  * Wrapper for ChainlinkClient. Builds Chainlink requests
