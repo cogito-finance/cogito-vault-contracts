@@ -34,13 +34,13 @@ cast wallet import -i deployer
 To deploy to sepolia:
 
 ```sh
-NETWORK=sepolia DEPLOY_USDC=true forge script script/DeployFundVault.s.sol -f sepolia --account deployer --broadcast
+NETWORK=sepolia DEPLOY_USDC=true forge script script/v2/DeployFundVaultV2.s.sol -f sepolia --account deployer --broadcast
 ```
 
 To deploy to mainnet:
 
 ```sh
-NETWORK=mainnet forge script script/DeployFundVault.s.sol -f mainnet --account deployer --broadcast
+NETWORK=mainnet forge script script/v2/DeployFundVaultV2.s.sol -f mainnet --account deployer --broadcast
 ```
 
 Verify on etherscan:

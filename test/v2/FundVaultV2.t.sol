@@ -260,7 +260,7 @@ contract VaultTestBalancesV2 is FundVaultFactoryV2 {
         vm.expectEmit();
         emit Transfer(alice, address(0), redeemShares);
         vm.prank(operator);
-        fundVault.processRedemption(alice, redeemShares, address(usdc), expectedUsdc);
+        fundVault.processRedemption(alice, address(usdc), expectedUsdc, redeemShares);
 
         // Balances after redeem
         assertGt(usdc.balanceOf(address(fundVault)), 0);
@@ -281,7 +281,7 @@ contract VaultTestBetweenOperations is FundVaultFactoryV2 {
 
         assertLt(usdc.balanceOf(alice), 100_000e6);
 
-        vm.expectRevert("ERC20: transfer amount exceeds balance");
+        vm.expectRevert(abi.encodeWithSelector(InsufficientBalance.selector, 100_000e6 - 1, 100_000e6));
         vm.prank(operator);
         fundVault.processDeposit(alice, address(usdc), 100_000e6, 100_000e6);
 
@@ -299,9 +299,9 @@ contract VaultTestBetweenOperations is FundVaultFactoryV2 {
         fundVault.transfer(bob, 50_000e6);
         vm.stopPrank();
 
-        vm.expectRevert("ERC20: burn amount exceeds balance");
+        vm.expectRevert(abi.encodeWithSelector(InsufficientBalance.selector, balance - 50_000e6, balance - 10_000e6));
         vm.prank(operator);
-        fundVault.processRedemption(alice, balance - 10_000e6, address(usdc), balance - 10_000e6);
+        fundVault.processRedemption(alice, address(usdc), balance - 10_000e6, balance - 10_000e6);
         assertEq(fundVault.balanceOf(alice), balance - 50_000e6);
     }
 }

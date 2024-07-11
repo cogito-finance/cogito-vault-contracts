@@ -22,7 +22,7 @@ contract DeployFundVaultV2 is Script {
         string memory network = vm.envOr("NETWORK", string("localhost"));
         string memory json = vm.readFile(string.concat("./deploy/", network, ".json"));
 
-        address deployer = vm.envAddress("DEPLOYER");
+        address deployer = vm.envAddress("DEPLOYER_ADDRESS");
         vm.startBroadcast(deployer);
 
         if (shouldDeployUSDC) {
@@ -34,13 +34,13 @@ contract DeployFundVaultV2 is Script {
         kycManager =
             shouldDeployKycManager ? new KycManager(true) : KycManager(vm.parseJsonAddress(json, ".KycManager"));
 
-        fundVault = new FundVaultV2(vm.envAddress("OPERATOR_ADDRESS"), vm.envAddress("TREASURY_ADDRESS"), kycManager);
+        fundVault = new FundVaultV2(vm.envAddress("OPERATOR_ADDRESS"), vm.envAddress("CUSTODIAN_ADDRESS"), kycManager);
 
         vm.stopBroadcast();
 
         // Write to json
         vm.serializeAddress(json, "KycManager", address(kycManager));
-        vm.serializeAddress(json, "FundVault", address(fundVault));
+        vm.serializeAddress(json, "FundVaultV2", address(fundVault));
         string memory finalJson = vm.serializeAddress(json, "USDC", address(usdc));
         string memory file = string.concat("./deploy/", network, ".json");
         vm.writeJson(finalJson, file);

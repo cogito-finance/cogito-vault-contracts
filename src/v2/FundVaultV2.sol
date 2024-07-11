@@ -83,7 +83,7 @@ contract FundVaultV2 is ERC20, ReentrancyGuard, Pausable, AdminOperatorRoles, ER
     }
 
     /**
-     * Transfers assets from investor to vault
+     * Transfers assets from investor to vault and mints shares
      */
     function processDeposit(address investor, address asset, uint256 amount, uint256 shares)
         external
@@ -96,9 +96,9 @@ contract FundVaultV2 is ERC20, ReentrancyGuard, Pausable, AdminOperatorRoles, ER
     }
 
     /**
-     * Transfers assets from investor to vault
+     * Transfers assets from vault to investor and burns shares
      */
-    function processRedemption(address investor, uint256 shares, address asset, uint256 amount)
+    function processRedemption(address investor, address asset, uint256 amount, uint256 shares)
         external
         onlyAdminOrOperator
     {

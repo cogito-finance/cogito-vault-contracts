@@ -32,7 +32,7 @@ contract DeployFundVault is Script {
             ? vm.envAddress("CHAINLINK_ORACLE_ADDRESS_SEPOLIA")
             : vm.envAddress("CHAINLINK_ORACLE_ADDRESS");
 
-        address deployer = vm.envAddress("DEPLOYER");
+        address deployer = vm.envAddress("DEPLOYER_ADDRESS");
         vm.startBroadcast(deployer);
 
         if (shouldDeployUSDC) {
