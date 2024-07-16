@@ -92,7 +92,7 @@ contract FundVaultV2 is ERC20, ReentrancyGuard, Pausable, AdminOperatorRoles, ER
         _validateDeposit(investor, asset, amount);
         IERC20(asset).safeTransferFrom(investor, address(this), amount);
         _mint(investor, shares);
-        emit ProcessDeposit(investor, asset, amount);
+        emit ProcessDeposit(investor, asset, amount, shares);
     }
 
     /**
