@@ -1,7 +1,6 @@
-# Cogito Protocol Contracts
+# Cogito Protocol Contracts (V2)
 
-- Fund vaults follow the [ERC-4626](https://ethereum.org/en/developers/docs/standards/tokens/erc-4626/) standard.
-- Uses latest OpenZeppelin and Chainlink libraries
+Represents a fund with offchain custodian and NAV, with a whitelisted set of holders.
 
 ## Development
 
@@ -46,6 +45,12 @@ NETWORK=mainnet forge script script/v2/DeployFundVaultV2.s.sol -f mainnet --acco
 Verify on etherscan:
 
 ```sh
-forge verify-contract --chain-id 1 --num-of-optimizations 200 --watch --constructor-args $(cast abi-encode "constructor(uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256)" 15 100000000000 10000000000 1000000000000000 0 1000000000000000 5 0 0) --compiler-version v0.8.19+commit.7dd6d404 0xdaFec86d96F8a97f34186f9988Ead7991CBc2dd4 src/BaseVault.sol:BaseVault
-forge verify-contract --chain-id 1 --num-of-optimizations 200 --watch --constructor-args $(cast abi-encode "constructor(bool)" true) --compiler-version v0.8.19+commit.7dd6d404 0x908f368431B2A9d2D26E2d9984b8c81e37E4FAEc src/KycManager.sol:KycManager
+export KYC_MANAGER_ADDRESS=0x908f368431B2A9d2D26E2d9984b8c81e37E4FAEc
+export FUND_VAULT_ADDRESS=0xAf2d8b3075dC237E2ebC620555Dce941ED1B86c2
+forge verify-contract --chain-id 1 --num-of-optimizations 200 --watch --constructor-args $(cast abi-encode "constructor(bool)" true) --compiler-version v0.8.19+commit.7dd6d404 $KYC_MANAGER_ADDRESS src/KycManager.sol:KycManager
+forge verify-contract --chain-id 1 --num-of-optimizations 200 --watch --constructor-args $(cast abi-encode "constructor(address,address,address)" $OPERATOR_ADDRESS $CUSTODIAN_ADDRESS $KYC_MANAGER_ADDRESS) --compiler-version v0.8.19+commit.7dd6d404 $FUND_VAULT_ADDRESS src/v2/FundVaultV2.sol:FundVaultV2
 ```
+
+## Contract Deployments
+
+Addresses can be found in [/deploy](/deploy).
