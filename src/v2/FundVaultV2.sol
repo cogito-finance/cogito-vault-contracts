@@ -32,6 +32,8 @@ contract FundVaultV2 is ERC20, ReentrancyGuard, Pausable, AdminOperatorRoles, ER
     address public _custodian;
     IKycManager public _kycManager;
 
+    uint256 public _tvl;
+
     ////////////////////////////////////////////////////////////
     // Init
     ////////////////////////////////////////////////////////////
@@ -42,6 +44,7 @@ contract FundVaultV2 is ERC20, ReentrancyGuard, Pausable, AdminOperatorRoles, ER
 
         _custodian = custodian;
         _kycManager = kycManager;
+        _tvl = 0;
     }
 
     function decimals() public view virtual override returns (uint8) {
@@ -89,8 +92,6 @@ contract FundVaultV2 is ERC20, ReentrancyGuard, Pausable, AdminOperatorRoles, ER
         external
         onlyAdminOrOperator
     {
-        _validateDeposit(investor, asset, amount);
-        IERC20(asset).safeTransferFrom(investor, address(this), amount);
         _mint(investor, shares);
         emit ProcessDeposit(investor, asset, amount, shares);
     }
@@ -105,6 +106,9 @@ contract FundVaultV2 is ERC20, ReentrancyGuard, Pausable, AdminOperatorRoles, ER
         _validateRedemption(investor, shares);
         _burn(investor, shares);
         IERC20(asset).safeTransfer(investor, amount);
+
+        _tvl -= amount;
+
         emit ProcessRedemption(investor, shares, asset, amount);
     }
 
@@ -156,6 +160,10 @@ contract FundVaultV2 is ERC20, ReentrancyGuard, Pausable, AdminOperatorRoles, ER
         _kycManager.onlyNotBanned(msg.sender);
 
         _validateDeposit(msg.sender, asset, amount);
+
+        IERC20(asset).safeTransferFrom(msg.sender, address(this), amount);
+
+        _tvl += amount;
 
         emit RequestDeposit(msg.sender, asset, amount);
         return 0;
@@ -253,5 +261,13 @@ contract FundVaultV2 is ERC20, ReentrancyGuard, Pausable, AdminOperatorRoles, ER
         if (share > balanceOf(user)) {
             revert InsufficientBalance(balanceOf(user), share);
         }
+    }
+
+    ////////////////////////////////////////////////////////////
+    // Emergency functions
+    ////////////////////////////////////////////////////////////
+
+    function _fixTVL(uint256 newTvl) external onlyAdmin {
+        _tvl = newTvl;
     }
 }
