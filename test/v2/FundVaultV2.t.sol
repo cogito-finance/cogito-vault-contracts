@@ -7,8 +7,8 @@ import "forge-std/Test.sol";
 
 import "../../src/KycManager.sol";
 import "../../src/interfaces/Errors.sol";
-import "../../src/utils/ERC1404.sol";
-import "../../src/v2/FundVaultV2.sol";
+import "../../src/utils/ERC1404Upgradeable.sol";
+import "../../src/v2/FundVaultV2Upgradeable.sol";
 import "../../src/v2/interfaces/IFundVaultEventsV2.sol";
 import "./helpers/FundVaultFactoryV2.sol";
 import "../../src/mocks/USDC.sol";
