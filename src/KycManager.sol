@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-import "openzeppelin-contracts/access/Ownable.sol";
+import "openzeppelin-contracts-upgradeable/access/OwnableUpgradeable.sol";
 
 import "./interfaces/Errors.sol";
 import "./interfaces/IKycManager.sol";
@@ -9,7 +9,7 @@ import "./interfaces/IKycManager.sol";
 /**
  * Handles address permissions. An address can be KYCed for US or non-US purposes. Additionally, an address may be banned
  */
-contract KycManager is IKycManager, Ownable {
+contract KycManager is IKycManager, OwnableUpgradeable {
     mapping(address => User) userData;
     address[] public userList;
     uint16 userCount = 0;
