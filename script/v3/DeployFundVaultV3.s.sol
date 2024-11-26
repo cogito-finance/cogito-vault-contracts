@@ -4,8 +4,6 @@ pragma solidity ^0.8.19;
 import "openzeppelin-contracts/utils/Strings.sol";
 import "forge-std/Script.sol";
 import "openzeppelin-contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
-import "openzeppelin-contracts/proxy/transparent/ProxyAdmin.sol";
-
 import "../../src/mocks/USDC.sol";
 import "../../src/KycManager.sol";
 import "../../src/v3/FundVaultV3Upgradeable.sol";
@@ -13,10 +11,11 @@ import "../../src/v3/FundVaultV3Upgradeable.sol";
 contract DeployFundVaultV3Upgradeable is Script {
     using Strings for string;
 
-    KycManager public kycManager;
+    // Contract instances
+    KycManager public kycManagerImplementation;
+    TransparentUpgradeableProxy public kycManagerProxy;
     FundVaultV3Upgradeable public implementation;
-    TransparentUpgradeableProxy public proxy;
-    ProxyAdmin public proxyAdmin;
+    TransparentUpgradeableProxy public fundVaultProxy;
     USDC public usdc;
 
     function run() external {
@@ -24,7 +23,9 @@ contract DeployFundVaultV3Upgradeable is Script {
         bool shouldDeployKycManager = vm.envOr("DEPLOY_KYC_MANAGER", true);
 
         string memory network = vm.envOr("NETWORK", string("localhost"));
-        string memory json = vm.readFile(string.concat("./deploy/", network, ".json"));
+        string memory json = vm.readFile(
+            string.concat("./deploy/", network, ".json")
+        );
 
         address deployer = vm.envAddress("DEPLOYER_ADDRESS");
         address operator = vm.envAddress("OPERATOR_ADDRESS");
@@ -40,39 +41,76 @@ contract DeployFundVaultV3Upgradeable is Script {
         }
 
         // Deploy or get KycManager
-        kycManager = 
-            shouldDeployKycManager ? new KycManager(true) : KycManager(vm.parseJsonAddress(json, ".KycManager"));
+        if (shouldDeployKycManager) {
+            // Deploy KycManager implementation
+            kycManagerImplementation = new KycManager();
 
-        // Deploy ProxyAdmin
-        proxyAdmin = new ProxyAdmin();
+            // Prepare KycManager initialization data
+            bytes memory kycInitData = abi.encodeWithSelector(
+                KycManager.initialize.selector,
+                true, // strictOn
+                operator
+            );
 
-        // Deploy implementation
+            // Deploy KycManager proxy
+            kycManagerProxy = new TransparentUpgradeableProxy(
+                address(kycManagerImplementation),
+                deployer,
+                kycInitData
+            );
+        } else {
+            kycManagerProxy = TransparentUpgradeableProxy(
+                vm.parseJsonAddress(json, ".KycManager")
+            );
+        }
+
+        // Deploy FundVault implementation
         implementation = new FundVaultV3Upgradeable();
 
-        // Prepare initialization data
-        bytes memory initData = abi.encodeWithSelector(
+        // Prepare FundVault initialization data
+        bytes memory fundVaultInitData = abi.encodeWithSelector(
             FundVaultV3Upgradeable.initialize.selector,
             operator,
             custodian,
-            kycManager
+            address(kycManagerProxy)
         );
 
-        // Deploy proxy
-        proxy = new TransparentUpgradeableProxy(
+        // Deploy FundVault proxy
+        fundVaultProxy = new TransparentUpgradeableProxy(
             address(implementation),
-            address(proxyAdmin),
-            initData
+            deployer,
+            fundVaultInitData
         );
 
         vm.stopBroadcast();
 
         // Write to json
-        vm.serializeAddress(json, "KycManager", address(kycManager));
-        vm.serializeAddress(json, "FundVaultV2Implementation", address(implementation));
-        vm.serializeAddress(json, "FundVaultV2Proxy", address(proxy));
-        vm.serializeAddress(json, "ProxyAdmin", address(proxyAdmin));
-        string memory finalJson = vm.serializeAddress(json, "USDC", address(usdc));
-        
+
+        if (shouldDeployKycManager) {
+            vm.serializeAddress(
+                json,
+                "KycManagerImplementation",
+                address(kycManagerImplementation)
+            );
+            vm.serializeAddress(
+                json,
+                "KycManagerProxy",
+                address(kycManagerProxy)
+            );
+        }
+
+        vm.serializeAddress(
+            json,
+            "FundVaultV2Implementation",
+            address(implementation)
+        );
+        vm.serializeAddress(json, "FundVaultV2Proxy", address(fundVaultProxy));
+        string memory finalJson = vm.serializeAddress(
+            json,
+            "USDC",
+            address(usdc)
+        );
+
         string memory file = string.concat("./deploy/", network, ".json");
         vm.writeJson(finalJson, file);
         console.log("Contract addresses saved to %s", file);
