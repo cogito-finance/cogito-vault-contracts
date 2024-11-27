@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-import "openzeppelin-contracts/access/Ownable.sol";
+import "./utils/AdminOperatorRoles.sol";
 
 import "./interfaces/Errors.sol";
 import "./interfaces/IKycManager.sol";
@@ -9,7 +9,7 @@ import "./interfaces/IKycManager.sol";
 /**
  * Handles address permissions. An address can be KYCed for US or non-US purposes. Additionally, an address may be banned
  */
-contract KycManager is IKycManager, Ownable {
+contract KycManager is IKycManager, AdminOperatorRoles {
     mapping(address => User) userData;
     address[] public userList;
     uint16 userCount = 0;
@@ -23,6 +23,7 @@ contract KycManager is IKycManager, Ownable {
     }
 
     constructor(bool _strictOn) {
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         strictOn = _strictOn;
     }
 
@@ -30,15 +31,24 @@ contract KycManager is IKycManager, Ownable {
     // Grant
     ////////////////////////////////////////////////////////////
 
-    function bulkGrantKyc(address[] calldata _investors, KycType[] calldata _kycTypes) external onlyOwner {
+    function bulkGrantKyc(
+        address[] calldata _investors,
+        KycType[] calldata _kycTypes
+    ) external onlyAdminOrOperator {
         require(_investors.length == _kycTypes.length, "invalid input");
         for (uint256 i = 0; i < _investors.length; i++) {
             _grantKyc(_investors[i], _kycTypes[i]);
         }
     }
 
-    function _grantKyc(address _investor, KycType _kycType) internal onlyNonZeroAddress(_investor) {
-        require(KycType.US_KYC == _kycType || KycType.GENERAL_KYC == _kycType, "invalid kyc type");
+    function _grantKyc(
+        address _investor,
+        KycType _kycType
+    ) internal onlyNonZeroAddress(_investor) {
+        require(
+            KycType.US_KYC == _kycType || KycType.GENERAL_KYC == _kycType,
+            "invalid kyc type"
+        );
 
         _addUserIfNotExist(_investor);
         userData[_investor].kycType = _kycType;
@@ -49,13 +59,17 @@ contract KycManager is IKycManager, Ownable {
     // Revoke
     ////////////////////////////////////////////////////////////
 
-    function bulkRevokeKyc(address[] calldata _investors) external onlyOwner {
+    function bulkRevokeKyc(
+        address[] calldata _investors
+    ) external onlyAdminOrOperator {
         for (uint256 i = 0; i < _investors.length; i++) {
             _revokeKyc(_investors[i]);
         }
     }
 
-    function _revokeKyc(address _investor) internal onlyNonZeroAddress(_investor) {
+    function _revokeKyc(
+        address _investor
+    ) internal onlyNonZeroAddress(_investor) {
         _addUserIfNotExist(_investor);
         User storage user = userData[_investor];
         emit RevokeKyc(_investor, user.kycType);
@@ -66,7 +80,9 @@ contract KycManager is IKycManager, Ownable {
     // Ban
     ////////////////////////////////////////////////////////////
 
-    function bulkBan(address[] calldata _investors) external onlyOwner {
+    function bulkBan(
+        address[] calldata _investors
+    ) external onlyAdminOrOperator {
         for (uint256 i = 0; i < _investors.length; i++) {
             _setBanned(_investors[i], true);
         }
@@ -76,18 +92,23 @@ contract KycManager is IKycManager, Ownable {
     // Unban
     ////////////////////////////////////////////////////////////
 
-    function bulkUnBan(address[] calldata _investors) external onlyOwner {
+    function bulkUnBan(
+        address[] calldata _investors
+    ) external onlyAdminOrOperator {
         for (uint256 i = 0; i < _investors.length; i++) {
             _setBanned(_investors[i], false);
         }
     }
 
-    function _setBanned(address _investor, bool _status) internal onlyNonZeroAddress(_investor) {
+    function _setBanned(
+        address _investor,
+        bool _status
+    ) internal onlyNonZeroAddress(_investor) {
         userData[_investor].isBanned = _status;
         emit Banned(_investor, _status);
     }
 
-    function setStrict(bool _status) external onlyOwner {
+    function setStrict(bool _status) external onlyAdminOrOperator {
         strictOn = _status;
         emit SetStrict(_status);
     }
@@ -96,7 +117,9 @@ contract KycManager is IKycManager, Ownable {
     // Public getters
     ////////////////////////////////////////////////////////////
 
-    function getUserInfo(address _investor) external view returns (User memory user) {
+    function getUserInfo(
+        address _investor
+    ) external view returns (User memory user) {
         user = userData[_investor];
     }
 
@@ -104,7 +127,11 @@ contract KycManager is IKycManager, Ownable {
         return userList;
     }
 
-    function getAllUserInfo() external view returns (UserAddress[] memory info) {
+    function getAllUserInfo()
+        external
+        view
+        returns (UserAddress[] memory info)
+    {
         info = new UserAddress[](userCount);
         for (uint16 i = 0; i < userCount; i++) {
             address user = userList[i];
