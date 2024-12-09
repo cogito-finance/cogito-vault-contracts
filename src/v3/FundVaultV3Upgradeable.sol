@@ -7,6 +7,7 @@ import "openzeppelin-contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeabl
 import "openzeppelin-contracts-upgradeable/utils/math/MathUpgradeable.sol";
 import "openzeppelin-contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
 import "openzeppelin-contracts-upgradeable/proxy/utils/Initializable.sol";
+import "openzeppelin-contracts/token/ERC20/ERC20.sol";
 
 import "./interfaces/IFundVaultEventsV3.sol";
 import "../interfaces/IKycManager.sol";
@@ -109,17 +110,6 @@ contract FundVaultV3Upgradeable is
     }
 
     /**
-     * Transfers assets from investor to vault and mints shares
-     */
-    function processDeposit(address investor, address asset, uint256 amount, uint256 shares)
-        external
-        onlyAdminOrOperator
-    {
-        _mint(investor, shares);
-        emit ProcessDeposit(investor, asset, amount, shares);
-    }
-
-    /**
      * Transfers assets from vault to investor and burns shares
      */
     function processRedemption(address investor, address asset, uint256 amount, uint256 shares)
@@ -129,8 +119,6 @@ contract FundVaultV3Upgradeable is
         _validateRedemption(investor, shares);
         _burn(investor, shares);
         IERC20Upgradeable(asset).safeTransfer(investor, amount);
-
-        _tvl -= amount;
 
         emit ProcessRedemption(investor, shares, asset, amount);
     }
@@ -186,9 +174,12 @@ contract FundVaultV3Upgradeable is
 
         IERC20Upgradeable(asset).safeTransferFrom(msg.sender, address(this), amount);
 
-        _tvl += amount;
+        // scale amount to 6 decimals
+        uint256 shares = (amount * 1e6) / 10 ** ERC20(asset).decimals();
 
-        emit RequestDeposit(msg.sender, asset, amount);
+        _mint(msg.sender, shares);
+
+        emit Deposit(msg.sender, asset, amount, shares);
         return 0;
     }
 
@@ -246,24 +237,6 @@ contract FundVaultV3Upgradeable is
     }
 
     ////////////////////////////////////////////////////////////
-    // Conversion between deposits and shares
-    ////////////////////////////////////////////////////////////
-
-    function previewDeposit(uint256 assets) public view virtual returns (uint256) {
-        uint256 supply = totalSupply();
-        return (assets == 0 || supply == 0)
-            ? assets
-            : assets.mulDiv(supply, _latestNav, MathUpgradeable.Rounding.Down);
-    }
-
-    function previewRedeem(uint256 shares) public view virtual returns (uint256) {
-        uint256 supply = totalSupply();
-        return (supply == 0)
-            ? shares
-            : shares.mulDiv(_latestNav, supply, MathUpgradeable.Rounding.Down);
-    }
-
-    ////////////////////////////////////////////////////////////
     // Validation
     ////////////////////////////////////////////////////////////
 
@@ -288,13 +261,5 @@ contract FundVaultV3Upgradeable is
         if (share > balanceOf(user)) {
             revert InsufficientBalance(balanceOf(user), share);
         }
-    }
-
-    ////////////////////////////////////////////////////////////
-    // Emergency functions
-    ////////////////////////////////////////////////////////////
-
-    function _fixTVL(uint256 newTvl) external onlyAdmin {
-        _tvl = newTvl;
     }
 }
